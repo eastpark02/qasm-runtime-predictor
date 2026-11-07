@@ -10,3 +10,8 @@ RESULTS.md
 parser_validation.json
 *.csv
 .test-tmp/
+.DS_Store
+artifacts/oof_predictions.csv
+stepper/build/
+stepper/qasm_step
+stepper/qasm_step.exe
