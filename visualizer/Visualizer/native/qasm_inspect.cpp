@@ -7,6 +7,7 @@
 #include <set>
 #include <sstream>
 #include <iomanip>
+#include <fstream>
 
 namespace inspection {
 struct Call { std::string name, expression; std::vector<std::string> params, args, classical; size_t start, end; };
@@ -14,7 +15,7 @@ struct Gate { std::vector<std::string> params, args; std::vector<Call> body; };
 struct Register { int offset, size; bool quantum; };
 struct Record { std::string name; std::vector<int> qs, cs; std::vector<double> ps; size_t start,end,definition; int source_step; std::vector<std::string> path; };
 struct Inspector {
-  std::string source; size_t pos=0; int nq=0,nc=0,source_step=0,language=0; bool header=false;
+  std::string source; size_t pos=0,record_budget=0; int nq=0,nc=0,source_step=0,language=0; bool header=false;
   std::map<std::string,Register> registers; std::map<std::string,Gate> gates;
   std::vector<Record> records; std::vector<std::string> labels,clabels,source_names; std::vector<int> source_widths;
   std::vector<std::vector<double>> source_parameters; std::vector<std::vector<int>> source_qubits,source_clbits;
@@ -27,11 +28,11 @@ struct Inspector {
   bool eat(char c){ws();if(pos<source.size()&&source[pos]==c){++pos;return true;}return false;}
   void need(char c){if(!eat(c))fail(std::string("Expected '")+c+"'");}
   std::string id(){ws();size_t s=pos;if(pos>=source.size()||!ExprParser::idstart((unsigned char)source[pos]))fail("Expected identifier");
-    while(pos<source.size()&&ExprParser::idchar((unsigned char)source[pos]))++pos;return source.substr(s,pos-s);}
+    while(pos<source.size()&&ExprParser::idchar((unsigned char)source[pos]))++pos;if(pos-s>256)fail("Identifier inspection limit: 256 bytes");return source.substr(s,pos-s);}
   int integer(){ws();size_t s=pos;while(pos<source.size()&&std::isdigit((unsigned char)source[pos]))++pos;if(s==pos||pos-s>7)fail("Expected bounded integer");return std::stoi(source.substr(s,pos-s));}
   std::vector<std::string> identifiers(char ending){std::vector<std::string> out;if(eat(ending))return out;do{out.push_back(id());}while(eat(','));need(ending);return out;}
   std::vector<std::string> expressions(){std::vector<std::string> out;if(!eat('('))return out;ws();if(eat(')'))return out;
-    size_t s=pos;int depth=0;for(;pos<source.size();++pos){char c=source[pos];if(c=='(')++depth;else if(c==')'){if(depth==0){out.push_back(source.substr(s,pos-s));++pos;return out;}--depth;}else if(c==','&&depth==0){out.push_back(source.substr(s,pos-s));s=pos+1;}}
+    size_t s=pos;int depth=0;for(;pos<source.size();++pos){if(pos-s>65536)fail("Parameter expression inspection limit: 65,536 bytes");char c=source[pos];if(c=='(')++depth;else if(c==')'){if(depth==0){out.push_back(source.substr(s,pos-s));++pos;return out;}--depth;}else if(c==','&&depth==0){out.push_back(source.substr(s,pos-s));s=pos+1;}}
     fail("Unterminated parameter expression");}
   std::string operand(bool formal){auto a=id();if(eat('[')){if(formal)fail("Indexed formal operands are unsupported");int i=integer();need(']');a+='['+std::to_string(i)+']';}return a;}
   std::vector<std::string> operands(bool formal){std::vector<std::string> out;ws();if(pos<source.size()&&source[pos]==';')return out;do{out.push_back(operand(formal));}while(eat(','));return out;}
@@ -87,6 +88,11 @@ struct Inspector {
   void expand(const Call& c,const std::vector<int>& qs,const std::vector<int>& cs,const std::vector<double>& ps,size_t start,size_t end,int step,std::vector<std::string> path,int depth){
     if(depth>64)fail("Custom-gate nesting exceeds 64 levels");auto it=gates.find(c.name);
     if(it==gates.end()){validate_builtin(c.name,qs.size(),ps.size());if(records.size()>=100000)fail("Expanded inspection exceeds 100,000 instructions");
+      // Bound aggregate operand/path materialization before retaining records,
+      // including wide barriers and deep repeated custom-gate paths.
+      size_t cost=512+(qs.size()+cs.size())*12+ps.size()*32+c.name.size()*6;
+      for(const auto& part:path)cost+=part.size()*6+8;
+      if(cost>64*1024*1024-record_budget)fail("Expanded inspection metadata exceeds 64 MiB budget");record_budget+=cost;
       if(std::set<int>(qs.begin(),qs.end()).size()!=qs.size())fail("Repeated gate qubits");records.push_back({c.name,qs,cs,ps,start,end,c.start,step,path});return;}
     const Gate& g=it->second;if(qs.size()!=g.args.size()||ps.size()!=g.params.size())fail("Custom gate arity mismatch");path.push_back(c.name);
     for(const auto& child:g.body){std::vector<int> childqs;for(const auto& a:child.args){auto found=std::find(g.args.begin(),g.args.end(),a);if(found==g.args.end())fail("Unknown gate formal");childqs.push_back(qs[found-g.args.begin()]);}
@@ -108,7 +114,7 @@ struct Inspector {
     if(!header&&kind!="OPENQASM")fail("Header must be first");
     if(!calls.empty()&&(kind=="include"||kind=="gate"||kind=="qreg"||kind=="qubit"||kind=="creg"||kind=="bit"))fail("Late declarations require SOURCE inspection");
     if(kind=="OPENQASM"){if(header||!registers.empty()||!calls.empty()||!gates.empty())fail("Header must be first");ws();auto finish=source.find(';',pos);auto version=source.substr(pos,finish-pos);version.erase(std::remove_if(version.begin(),version.end(),[](unsigned char c){return std::isspace(c);}),version.end());if(version!="2.0"&&version!="3.0"&&version!="2"&&version!="3")fail("Unsupported QASM version");language=version[0]-'0';pos=finish;need(';');header=true;}
-    else if(kind=="include"){need('"');auto finish=source.find('"',pos);auto file=source.substr(pos,finish-pos);if(file!="qelib1.inc"&&file!="stdgates.inc")fail("Unsupported include");pos=finish;need('"');need(';');}
+    else if(kind=="include"){need('"');auto finish=source.find('"',pos);auto file=source.substr(pos,finish-pos);if(file!="qelib1.inc"&&file!="stdgates.inc")fail("Only bundled qelib1.inc and stdgates.inc includes are supported");pos=finish;need('"');need(';');}
     else if(kind=="qreg"||kind=="qubit"||kind=="creg"||kind=="bit")declaration(kind);
     else if(kind=="gate")definition();else{pos=start;auto c=call(false);calls.push_back(c);if(calls.size()>100000)fail("Source inspection limit");}}
     if(!header)fail("Missing OPENQASM header");for(const auto& c:calls){++source_step;top(c);}
@@ -118,15 +124,30 @@ std::string quote(const std::string& s){std::string out="\"";for(unsigned char c
 template<class T> void numbers(std::ostream& out,const std::vector<T>& values){out<<'[';for(size_t i=0;i<values.size();++i){if(i)out<<',';out<<values[i];}out<<']';}
 void strings(std::ostream& out,const std::vector<std::string>& values){out<<'[';for(size_t i=0;i<values.size();++i){if(i)out<<',';out<<quote(values[i]);}out<<']';}
 }
-int main(int argc,char** argv){try{if(argc!=2)throw std::runtime_error("Usage: qasm_inspect file.qasm");auto source=read_file(argv[1]);if(source.size()>5*1024*1024)throw std::runtime_error("5 MiB input limit");
+// Fail during output generation, before an oversized JSON buffer is allocated.
+struct BoundedOutput : std::streambuf {
+  size_t size=0; static constexpr size_t limit=64*1024*1024;
+  std::streamsize xsputn(const char* text,std::streamsize count) override {
+    if(count<0||size+size_t(count)>limit)throw std::runtime_error("Inspection output exceeds 64 MiB");
+    auto written=std::fwrite(text,1,size_t(count),stdout);size+=written;return std::streamsize(written);
+  }
+  int overflow(int c) override {if(c==traits_type::eof())return traits_type::not_eof(c);char value=char(c);return xsputn(&value,1)==1?c:traits_type::eof();}
+};
+int main(int argc,char** argv){try{if(argc!=2&&argc!=3)throw std::runtime_error("Usage: qasm_inspect file.qasm [max_bytes]");
+  size_t max_bytes=256*1024*1024;
+  if(argc==3){std::string value=argv[2];if(value.empty()||value.find_first_not_of("0123456789")!=std::string::npos)throw std::runtime_error("Invalid native max_bytes");max_bytes=std::stoull(value);}
+  if(max_bytes<1||max_bytes>256*1024*1024)throw std::runtime_error("Native max_bytes must be 1 through 268435456");
+  std::ifstream input(argv[1],std::ios::binary|std::ios::ate);if(!input)throw std::runtime_error("Cannot open QASM input");
+  auto length=input.tellg();if(length<0||uint64_t(length)>max_bytes)throw std::runtime_error("Native input exceeds configured "+std::to_string(max_bytes)+"-byte limit");
+  std::string source(size_t(length),'\0');input.seekg(0);if(!input.read(source.data(),std::streamsize(source.size())))throw std::runtime_error("Cannot read QASM input");
   // Accept UTF-8 BOM while preserving all source offsets.
   if(source.compare(0,3,"\xef\xbb\xbf")==0)source.replace(0,3,"   ");
-  inspection::Inspector parser(std::move(source));parser.run();std::ostringstream out;out<<std::setprecision(17);out<<"{\"num_qubits\":"<<parser.nq<<",\"num_clbits\":"<<parser.nc<<",\"qubit_labels\":";inspection::strings(out,parser.labels);out<<",\"clbit_labels\":";inspection::strings(out,parser.clabels);out<<",\"source_widths\":";inspection::numbers(out,parser.source_widths);
+  inspection::Inspector parser(std::move(source));parser.run();BoundedOutput buffer;std::ostream out(&buffer);out.exceptions(std::ios::badbit|std::ios::failbit);out<<std::setprecision(17);out<<"{\"num_qubits\":"<<parser.nq<<",\"num_clbits\":"<<parser.nc<<",\"qubit_labels\":";inspection::strings(out,parser.labels);out<<",\"clbit_labels\":";inspection::strings(out,parser.clabels);out<<",\"source_widths\":";inspection::numbers(out,parser.source_widths);
   out<<",\"source_names\":";inspection::strings(out,parser.source_names);
   out<<",\"source_parameters\":[";for(size_t i=0;i<parser.source_parameters.size();++i){if(i)out<<',';inspection::numbers(out,parser.source_parameters[i]);}out<<']';
   out<<",\"source_qubits\":[";for(size_t i=0;i<parser.source_qubits.size();++i){if(i)out<<',';inspection::numbers(out,parser.source_qubits[i]);}out<<']';
   out<<",\"source_clbits\":[";for(size_t i=0;i<parser.source_clbits.size();++i){if(i)out<<',';inspection::numbers(out,parser.source_clbits[i]);}out<<']';
   out<<",\"instructions\":[";
   for(size_t i=0;i<parser.records.size();++i){const auto& r=parser.records[i];if(i)out<<',';out<<"{\"name\":"<<inspection::quote(r.name)<<",\"qubits\":";inspection::numbers(out,r.qs);out<<",\"clbits\":";inspection::numbers(out,r.cs);out<<",\"parameter_values\":";inspection::numbers(out,r.ps);out<<",\"start\":"<<r.start<<",\"end\":"<<r.end<<",\"definition_start\":"<<r.definition<<",\"source_step\":"<<r.source_step<<",\"call_path\":";inspection::strings(out,r.path);out<<'}';}
-  out<<"]}";auto text=out.str();if(text.size()>64*1024*1024)throw std::runtime_error("Inspection output limit");std::puts(text.c_str());return 0;
+  out<<"]}";return 0;
 }catch(const std::exception& e){std::fprintf(stderr,"%s\n",e.what());return 2;}}

@@ -89,6 +89,7 @@ def test_state_cache_boundaries_and_manual_pair_selection(client):
     b = client.post(f'/api/circuits/{cid}/state', json={'step':3, 'pair':[0,1]})
     assert b.json()['cached'] is True
     c = client.post(f'/api/circuits/{cid}/state', json={'step':3, 'pair':[0,2]})
+    assert c.status_code == 200, c.text
     assert c.json()['pair']['qubits'] == [0,2]
     assert c.json()['cached'] is False
     assert client.post(f'/api/circuits/{cid}/state', json={'step':3, 'pair':[0,0]}).status_code == 422
@@ -114,7 +115,7 @@ def test_origin_host_and_body_limits(client):
     client, _ = client
     assert client.get('/api/health', headers={'Host':'evil.example'}).status_code == 403
     assert client.post('/api/examples/bell', headers={'Origin':'https://evil.example'}).status_code == 403
-    assert client.post('/api/circuits', content=b' ' * (5 * 1024 * 1024 + 1)).status_code == 413
+    assert client.post('/api/circuits', headers={'Content-Length': str(256 * 1024 * 1024 + 1)}, content=b'').status_code == 413
 
 
 def test_worker_timeout_surfaces_and_next_request_recovers(tmp_path):

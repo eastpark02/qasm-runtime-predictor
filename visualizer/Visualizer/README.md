@@ -30,13 +30,14 @@ opening a browser. It does not expose the app to the network.
 1. Open a synthetic example or upload an **exact, allowlisted UTF-8 `.qasm` file**.
    Download buttons provide the exact example files for testing uploads.
 2. Click a gate, use previous/next, drag the slider, or enter a step number. Use
-   **Fullscreen**, drag to pan, wheel/pinch to zoom, **Fit circuit** for the full
+   **Fullscreen**, scroll vertically through qubits or horizontally through gates,
+   pinch (or Ctrl+scroll) to zoom, **Fit circuit** for the full
    navigator, and **Focus selected** to return to the selected instruction.
 3. **Inspect features here** extracts the current prefix's model inputs.
 4. **Predict runtime here** predicts a fresh simulator run through that step,
    then loads its signed top-10 SHAP explanation separately.
 5. **Calculate state here** calculates a small ideal-state checkpoint.
-6. **Run this checkpoint on qBraid** lets you select a configured account profile,
+6. **qBraid connector** on the main dashboard includes an Upload QASM button and lets you select a configured account profile,
    simulator/QPU and shots, review an estimate, then explicitly submit one job.
    See [qBraid setup and billing behavior](QBRAID.md).
 
@@ -126,21 +127,56 @@ full Qiskit import. Loops, standalone else, calibration, external includes, gate
 modifiers, aliases, symbolic inputs and unsupported syntax produce explicit errors.
 This is not a complete compiler; see [conditional upload details](BACKEND-MODEL.md#conditional-uploads).
 
-Inspection is capped at 5 MiB UTF-8 input and 2,048 qubits, with a killable
-10-second import worker. Native expansion is capped at 100,000 records; unsupported
-or over-limit expansion uses the labeled source view when that view can accept
-the input. The circuit viewport renders only visible wires/gates, pages instruction
-data in bounded batches and provides a whole-circuit overview. Custom calls and
-broadcasts stay collapsed only in source fallback. Four circuits and 64 computed
-results are cached. There are at
-most two simultaneous parse/state workers. Quantum calculation wall time is
-reported separately from the model's target-simulator runtime estimate.
+Uploads accept up to **256 MiB** of exact, allowlisted UTF-8 QASM by default.
+Set `VISUALIZER_MAX_UPLOAD_BYTES` to a positive integer through `268435456`
+to lower the byte ceiling. `/api/health` and the upload UI report the active limit.
+Requests stream to a private session file and are SHA-256-authorized before
+UTF-8 decoding or any inspection. Unknown contents remain blocked, regardless of size.
+
+Interactive inspection has separate limits: **32 MiB, 100,000 source or expanded
+instructions, 2,048 qubits, and a 10-second native/preprocessing deadline**.
+The app-owned native executable receives the same configured byte ceiling as
+the API; standalone native inspection defaults to 256 MiB. Its JSON writer stops
+at 64 MiB. Source/body previews are bounded to 4,096 characters; exact source and
+offsets still determine prefixes and model inputs. The viewport pages instructions
+and renders visible gates. Python SOURCE fallback is limited to 5 MiB.
+
+Files above 32 MiB, and files above 5 MiB whose interactive inspection fails,
+open in **Full circuit mode**. The original file is retained on disk; it does not
+enter Python statement parsing or Qiskit. Syntax and qubit/gate counts are
+unvalidated in this mode. The only checkpoint is **Full circuit** (API source step
+1); diagram, arbitrary prefixes, state, stepper and cloud execution are unavailable.
+The exact, unnormalized source is passed to the unchanged pinned predictor in a
+separate Windows process. Prediction and SHAP reuse the resulting feature cache.
+This mode does not imply that millions of instructions can be visualized or
+that every accepted file can finish feature extraction within its resource budget.
+
+One full-file extraction may run at a time. Its default budget is **180 seconds
+and 3 GiB aggregate committed memory**, including native descendants, enforced
+by a Windows Job Object with process-tree cleanup. Configure
+`VISUALIZER_LARGE_FEATURE_TIMEOUT` (1–600 seconds) and
+`VISUALIZER_LARGE_FEATURE_MEMORY_BYTES` (256 MiB–8 GiB) if appropriate for the host.
+Timeouts and extraction/memory failures produce explicit errors, never a partial
+source prediction. Upstream parser failures that would substitute all-zero raw
+features are surfaced as failures in this mode. Native feature fallback/truncation
+remains labeled without changing the predictor's features.
+
+State calculations retain their independent 12-qubit/10,000-operation limits.
+Four circuit records, 64 feature/prediction results and two concurrent uploads
+are bounded per session. File-backed records are removed on eviction and shutdown;
+active extraction leases defer deletion. There are at most two parse/state workers.
+Calculation wall time is separate from the target simulator runtime estimate.
 
 ## Model explanations
 
 Local Tree SHAP explanations follow each explicit prediction and report **log10(seconds)** contributions to the
 raw mean output of the four tree regressors before timeout/cap postprocessing. They are not additive seconds or causal effects.
-The ten largest absolute contributions retain their signs and input values.
+Up to ten largest absolute contributions retain their signs and input values;
+when fewer exist, all available contributions are shown. **Explain this
+checkpoint** also requests SHAP independently of prediction. The selected step
+and threshold determine which explanation appears; navigating or changing the
+threshold never silently computes a new explanation. Derived inputs supplement
+raw features, so seven derived inputs do not limit the SHAP chart to seven rows.
 Baseline, raw output, the other contributions' sum and any final timeout/cap
 adjustment are shown. All raw features and threshold-derived inputs remain
 searchable in separate tabs. An explanation failure does not discard a prediction;
@@ -170,7 +206,11 @@ use synthetic circuits and mocked qBraid services. API docs: `/docs`.
 For frontend live editing, run the backend with the launcher and `npm.cmd run dev`
 in `frontend`; Vite proxies `/api` to port 8000.
 
-The qBraid SDK is configured server-side with explicitly selected profiles. The
+For local testing, enter an API key in the page's **Connect qBraid for local
+testing** password field. The key is held in server memory for the connection,
+cleared from the input on connection, and requires reconnection after restarting
+the server. Environment-based profiles remain supported. See [QBRAID.md](QBRAID.md)
+for reconnecting saved jobs and disconnect behavior. The
 app reads actual wallet balances, shows estimates when available, and never
 automatically switches keys on exhaustion or errors. No cloud job runs until the
 user reviews and submits it. No audit evaluation or training is performed.

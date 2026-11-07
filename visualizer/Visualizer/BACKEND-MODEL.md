@@ -182,7 +182,7 @@ development-validation report. No evaluation is run to produce one.
 
 ## Conditional uploads
 
-Measurement-conditioned `if` statements are accepted through a bounded source
+Interactive measurement-conditioned `if` statements up to 5 MiB are accepted through a bounded source
 view (`inspection_mode=conditional_source`). Each block is one collapsed source
 step; nested conditions and empty bodies remain intact. Full-circuit runtime
 features and predictions receive the exact original text. Prefixes preserve
@@ -197,3 +197,50 @@ Exact state calculation stops before the first measurement/reset/branch and
 retains the twelve-qubit limit. Loops, standalone else, modifiers, calibration,
 external includes and unsupported declarations remain explicit errors. Upload
 hash authorization is still required before any parsing and every computation.
+
+## Large uploads and exact full-source inference
+
+The byte ceiling is independent of interactive operation limits. The default
+`VISUALIZER_MAX_UPLOAD_BYTES=268435456` accepts 256 MiB. Uploads stream to private
+session files and incremental SHA-256 authorization precedes decoding or parsing.
+The native CLI receives the configured ceiling; its output and aggregate expanded
+record metadata are each bounded to 64 MiB. Interactive source is limited to
+32 MiB, 100,000 source/expanded instructions, 2,048 qubits, 64 nesting levels,
+256-byte identifiers and 65,536-byte individual parameter expressions. The
+inspection attempt includes native execution and Python alignment in a 10-second
+deadline; Python SOURCE fallback is limited to 5 MiB. Metadata previews contain
+at most 4,096 characters, with truncation flags; prefixes regenerate full numeric
+primitives or use exact original spans, never preview text.
+
+Above 32 MiB, or above 5 MiB when native inspection fails, the app returns
+`inspection_mode=full_source_only`, `inspection_backend=not_run_large_file`,
+`full_source_only=true`, and the byte size. Qubit and instruction counts are
+`null`: they are unknown. Syntax is unvalidated, and any native failure reason
+is reported. No include is resolved in this mode; the pinned feature extractor
+consumes the original text. It does not invoke Qiskit or the app's source parser.
+
+The sole available checkpoint is source step `1`, labeled **Full circuit**;
+`input_hash == prefix_hash` and `prefix_kind=original_full_source`. Navigation,
+overview, state, stepper and cloud endpoints reject this mode explicitly. Runtime
+features, prediction and Tree SHAP remain available through manual actions. The
+original exact bytes are rehashed before every request, including cache hits, and
+again inside the feature worker. Decoding uses strict UTF-8 without normalization,
+BOM stripping or replacement characters.
+
+The same verified six-file predictor snapshot and native binary are loaded by
+an isolated Windows worker; inference code, artifacts and feature formulas are
+unchanged. One full-file worker runs at a time, by default for 180 seconds with
+3 GiB aggregate job committed memory. `VISUALIZER_LARGE_FEATURE_TIMEOUT` accepts
+1–600 seconds; `VISUALIZER_LARGE_FEATURE_MEMORY_BYTES` accepts 256 MiB–8 GiB.
+The Windows Job Object is installed before importing the predictor or spawning
+native children; kill-on-close terminates descendants when the worker stops.
+Timeout/resource failures surface as 408/422 responses. Pinned parser failures
+that would silently replace all raw features with zeros are rejected. Successful
+features are shared across thresholds, predictions and SHAP, preserving the
+upstream native fallback/truncation flags and diagnostics.
+
+Byte acceptance does not guarantee a prediction within these budgets. A source
+with millions of dense gates can exceed memory even if a parameter-heavy source
+of the same byte size succeeds. Source files are bounded to four cached circuits;
+replacement, eviction and shutdown remove their private files, with deletion
+deferred while extraction holds a lease. Two upload streams may run concurrently.

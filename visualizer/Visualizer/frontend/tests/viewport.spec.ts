@@ -65,6 +65,9 @@ test('fullscreen overlay works without browser fullscreen API and mobile stays c
 test('dragging and pinching gate columns moves the camera without selecting gates', async ({page}) => {
   await wideCircuit(page);
   await expect(page.locator('.circuit-viewport .gate').first()).toBeVisible();
+  // Raw mouse/CDP coordinates do not scroll like locator actions. The dashboard
+  // connector can put the circuit below the visible browser area.
+  await page.locator('.circuit-viewport').scrollIntoViewIfNeeded();
   const original = await page.locator('.circuit-viewport .gate').first().getAttribute('aria-label');
   const rect = (await page.locator('.circuit-viewport').boundingBox())!;
   await page.mouse.move(rect.x + 450, rect.y + 140);
@@ -77,9 +80,12 @@ test('dragging and pinching gate columns moves the camera without selecting gate
   await page.locator('.circuit-viewport .gate').nth(2).click();
   await expect(page.getByLabel('Jump to step')).not.toHaveValue('0');
   const selected = await page.getByLabel('Jump to step').inputValue();
+  // Selecting a gate can scroll it into view; measure again before raw touches.
+  await page.locator('.circuit-viewport').scrollIntoViewIfNeeded();
+  const touchRect = (await page.locator('.circuit-viewport').boundingBox())!;
   const session = await page.context().newCDPSession(page);
-  await session.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{id:1,x:rect.x+300,y:rect.y+150},{id:2,x:rect.x+450,y:rect.y+150}]});
-  await session.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{id:1,x:rect.x+240,y:rect.y+150},{id:2,x:rect.x+510,y:rect.y+150}]});
+  await session.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{id:1,x:touchRect.x+300,y:touchRect.y+150},{id:2,x:touchRect.x+450,y:touchRect.y+150}]});
+  await session.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{id:1,x:touchRect.x+240,y:touchRect.y+150},{id:2,x:touchRect.x+510,y:touchRect.y+150}]});
   await session.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
   await expect(page.locator('.zoom-readout')).not.toHaveText('100%');
   await expect(page.getByLabel('Jump to step')).toHaveValue(selected);

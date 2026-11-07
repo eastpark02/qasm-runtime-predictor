@@ -1,6 +1,97 @@
 # Verification — November 7, 2026
 
-## Visualizer, qBraid and standalone 3D iteration (latest)
+## Large QASM uploads and qBraid catalogue corrections (latest)
+
+- Uploads now accept 256 MiB by default, with streamed disk storage and content
+  authorization before parsing. The separate interactive budget remains 32 MiB,
+  100,000 instructions and 2,048 qubits. Full circuit mode retains the exact source
+  for features, prediction and SHAP; it does not offer diagram navigation, ideal
+  states or cloud execution, and does not claim the input syntax was validated.
+- A 5,740,047-byte synthetic circuit with 140,000 gates produced exactly the same
+  features and prediction through the direct pinned adapter, isolated worker and
+  HTTP API. Both extractors counted 140,000 gates; ten SHAP contributions returned.
+- A 218,359,743-byte synthetic circuit with 3,211,172 parameterized gates uploaded
+  through the HTTP API in 2.44 seconds. Exact-source extraction and prediction
+  completed in 18.14 seconds alone and 42.91 seconds during concurrent regression
+  checks, with ten SHAP contributions. Native status was complete (`st_ok=1`)
+  and both extractors counted every gate. This is synthetic size verification,
+  not a claim that the user's specific 213,242 KB file has been tested.
+- The default large worker uses one slot, 180 seconds and 3 GiB aggregate Windows
+  job memory. A denser 208 MiB / 17.7-million-operation fixture was accepted and
+  routed correctly; its real extraction hit the deliberately tested 2 GiB budget
+  and failed explicitly. Memory failures cannot become all-zero feature predictions.
+  Timeout probes confirmed that native descendants terminate with their worker.
+- The independent checker passed 26 cases covering streamed 208 MiB input, exact
+  bytes and hashes, UTF-8, caps, cached authorization, modified content, upload and
+  feature concurrency, duplicate-upload replacement, active-file eviction and cleanup.
+  Its large upload tests use a hash-probe model; the separate checks above use the
+  actual pinned model. A duplicate-upload LRU file leak was fixed during review.
+- Backend coverage: 169 cases passed across the full run and final targeted
+  reruns; one unavailable legacy-checkpoint test remains skipped. The first run
+  collected an old native-budget assertion while it was being updated; the final
+  inspector checks passed. A state-cache test was rerun successfully with all nine
+  API tests after the concurrent large benchmark ended. The existing Starlette/httpx
+  deprecation warning remains.
+- The live qBraid catalogue really returned `aws:ionq:qpu:forte-1`. Its labels now
+  distinguish IonQ hardware from the Amazon Braket submission route. ONLINE does
+  not claim account execution entitlement. Empty/failed refreshes clear stale data;
+  retired entries are excluded and estimate device/shot identities are checked.
+  The captured 100-shot estimate was 830 qBraid credits, consistent with the API's
+  30-credit task price plus 8 credits per shot. No real cloud job was submitted.
+- The final production frontend build and all 27 Chromium cases passed across the
+  full run and one targeted rerun. The moved dashboard required the raw-pointer
+  regression to scroll the circuit into view before dragging; its previous target
+  was outside the browser viewport. No product gesture change was needed.
+  Dashboard checks cover connection/device browsing before upload, its own Upload
+  QASM button, preserved device/profile selection, manual-only estimates and jobs,
+  unsupported large-file execution, and mobile containment.
+- Installed into the actual Visualizer app and restarted port 8000. Fresh desktop
+  and mobile browsers verified the connector directly below the source toolbar,
+  its upload button and API-key field before any circuit is loaded, and the 256 MiB
+  label. Live upload, native inspection, prediction, ten SHAP drivers and Bell-state
+  calculation passed. The independent checker streamed 5,925,101 unapproved bytes
+  to the live server and received the expected authorization 403 rather than the
+  former size 413. Both loopback host aliases report the new limits. Old tabs must
+  reload their startup health state; in-memory qBraid keys clear on restart.
+- Final app-owned inspector binary SHA-256:
+  `9f0cc1548c2398ab30bb63eb73ba5cdfa1488c1e64e0c3b7e5a05d3fd1201f68`.
+  The allowlist, pinned model manifest, upstream parser source and runtime stepper
+  binary remain unchanged. No corpus enumeration, training or dataset evaluation.
+
+## Trackpad navigation, SHAP controls and local qBraid connection (previous iteration)
+
+- Combined backend suite: **134 passed, 1 legacy-checkpoint test skipped** in
+  65.11 seconds. The existing Starlette/httpx deprecation warning remains.
+  This includes 32 qBraid tests and six synthetic SHAP contribution-count tests.
+- Production TypeScript/Vite build passed. Combined Chromium suite:
+  **24 passed** in 30.0 seconds, including pixel/line/page scroll units, horizontal
+  panning, Ctrl-wheel pinch, actual two-touch translation/pinch, fullscreen,
+  keyboard/drag selection, and no computation requests from navigation.
+- SHAP shows zero, one, seven, ten or at most ten of a larger result without a
+  minimum count. Empty/error/loading states, selected step/threshold labels,
+  independent Explain/Refresh/Retry, stale results and circuit replacement passed.
+  The user's already-uploaded `0d094263.qasm` returned ten contributions from
+  167 model inputs at expanded step 0 / threshold 256 on the old live server.
+  Seven derived inputs were not an explanation failure. The historical missing
+  chart's exact selection was unavailable; changing step/threshold reproduces
+  the empty-chart scenario, now explicitly labeled with a manual action.
+- Local qBraid password input clears when Connect starts. Fake-key/mock-remote
+  tests verify balance/catalogue access without estimating or submitting, QPU
+  selection, no key in persistence/error responses, bounded malformed requests,
+  wallet-bound saved-session reconnect, disconnect/restart quote revocation,
+  original-profile job polling and a delayed-connection selection race.
+  No actual credential or provider job was used; live account execution remains
+  a user-operated Connect → device/shots → estimate → Submit flow.
+- The external checkout is now `Aiden` commit `c6d9315` after its dev merge.
+  All six pinned inference files again match the existing manifest exactly.
+  The model, predictor inputs, native binaries and allowlist remain unchanged.
+- The 5 MiB upload/native-inspection cap was investigated but not raised in this
+  update. It is an application policy, not a frontend limit or an inherent limit
+  of the runtime feature parser. Full-source allocations, JSON serialization,
+  prefix construction and operation limits need separate treatment for robust
+  large-circuit support.
+
+## Visualizer, qBraid and standalone 3D iteration
 
 - Combined synthetic backend suite: **116 passed, 1 skipped** in 57.94 seconds.
   The skipped test requires the earlier legacy checkpoint beside the staging

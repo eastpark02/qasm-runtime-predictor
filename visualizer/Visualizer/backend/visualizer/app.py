@@ -1,12 +1,14 @@
 from collections import OrderedDict
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import json
 import hashlib
 import os
 from pathlib import Path
 import threading
 import time
+import tempfile
+import codecs
 from typing import Literal
 
 from fastapi import FastAPI, HTTPException, Query, Request
@@ -21,14 +23,16 @@ from .model_service import ModelService
 from .dev_model import DevModelService
 from .workers import run_isolated
 from .inspector import native_parse, expanded_prefix, verified_inspector
+from .limits import DEFAULT_UPLOAD_BYTES, INTERACTIVE_BYTES, PYTHON_FALLBACK_BYTES, validate_upload_bytes
 
 ROOT = Path(__file__).resolve().parents[2]
-MAX_BYTES = 5 * 1024 * 1024
+MAX_BYTES = DEFAULT_UPLOAD_BYTES
 
 
 class LRU:
-    def __init__(self, size):
+    def __init__(self, size, dispose=None):
         self.size, self.data, self.lock = size, OrderedDict(), threading.RLock()
+        self.dispose = dispose
 
     def get(self, key):
         with self.lock:
@@ -39,10 +43,22 @@ class LRU:
 
     def put(self, key, value):
         with self.lock:
+            previous = self.data.get(key)
+            if previous is not None and previous is not value and self.dispose:
+                self.dispose(previous)
             self.data[key] = value
             self.data.move_to_end(key)
             while len(self.data) > self.size:
-                self.data.popitem(last=False)
+                _, removed = self.data.popitem(last=False)
+                if self.dispose:
+                    self.dispose(removed)
+
+    def clear(self):
+        with self.lock:
+            if self.dispose:
+                for value in self.data.values():
+                    self.dispose(value)
+            self.data.clear()
 
 
 @dataclass
@@ -52,6 +68,16 @@ class Settings:
     predictor: Path = Path(os.environ.get('VISUALIZER_PREDICTOR', str(ROOT.parent / 'quantum-runtime-prediction-model' / 'qasm-runtime-predictor')))
     model_provider: str = os.environ.get('VISUALIZER_MODEL', 'dev')
     state_timeout: float = 10
+    max_upload_bytes: int = field(default_factory=lambda: int(os.environ.get('VISUALIZER_MAX_UPLOAD_BYTES', DEFAULT_UPLOAD_BYTES)))
+    large_feature_timeout: float = field(default_factory=lambda: float(os.environ.get('VISUALIZER_LARGE_FEATURE_TIMEOUT', '180')))
+    large_feature_memory_bytes: int = field(default_factory=lambda: int(os.environ.get('VISUALIZER_LARGE_FEATURE_MEMORY_BYTES', str(3 * 1024 ** 3))))
+
+    def __post_init__(self):
+        validate_upload_bytes(self.max_upload_bytes)
+        if isinstance(self.large_feature_timeout, bool) or not isinstance(self.large_feature_timeout, (int, float)) or not 1 <= self.large_feature_timeout <= 600:
+            raise ValueError('VISUALIZER_LARGE_FEATURE_TIMEOUT must be between 1 and 600 seconds')
+        if isinstance(self.large_feature_memory_bytes, bool) or not isinstance(self.large_feature_memory_bytes, int) or not 256 * 1024 ** 2 <= self.large_feature_memory_bytes <= 8 * 1024 ** 3:
+            raise ValueError('VISUALIZER_LARGE_FEATURE_MEMORY_BYTES must be an integer from 268435456 through 8589934592')
 
 
 class Checkpoint(BaseModel):
@@ -71,17 +97,38 @@ def create_app(settings=None, model=None):
             raise ValueError('VISUALIZER_MODEL must be dev or legacy')
         application.state.model = model or (DevModelService(settings.predictor, local, settings.root / 'runtime-checkpoint.json')
                                            if settings.model_provider == 'dev' else ModelService(settings.pipeline, local))
-        application.state.circuits = LRU(4)
+        application.state.file_lock = threading.RLock()
+        application.state.active_files = set()
+        application.state.pending_delete = set()
+        def dispose(record):
+            if record.get('source_path'):
+                with application.state.file_lock:
+                    path = record['source_path']
+                    if path in application.state.active_files:
+                        application.state.pending_delete.add(path)
+                    else:
+                        try:
+                            Path(path).unlink(missing_ok=True)
+                        except OSError:
+                            application.state.pending_delete.add(path)
+        application.state.circuits = LRU(4, dispose)
+        application.state.upload_directory = tempfile.TemporaryDirectory(prefix='visualizer-uploads-', ignore_cleanup_errors=True)
+        application.state.upload_workers = threading.BoundedSemaphore(2)
         application.state.results = LRU(64)
         application.state.traces = LRU(4)
         application.state.workers = threading.BoundedSemaphore(2)
+        application.state.large_workers = threading.BoundedSemaphore(1)
         try:
             _, application.state.inspector_build = verified_inspector(settings.root)
             application.state.inspector_error = None
         except (OSError, ValueError, KeyError) as exc:
             application.state.inspector_build = None
             application.state.inspector_error = str(exc)
-        yield
+        try:
+            yield
+        finally:
+            application.state.circuits.clear()
+            application.state.upload_directory.cleanup()
     app = FastAPI(title='Quantum Circuit Explorer', lifespan=lifespan)
 
     @app.middleware('http')
@@ -106,13 +153,40 @@ def create_app(settings=None, model=None):
             raise HTTPException(404, 'Circuit expired from the bounded session cache; upload or open it again')
         # Authorization is checked again at every computational entry point.
         try:
-            app.state.policy.authorize(record['source'].encode())
+            app.state.policy.authorize_digest(cid)
+            if record.get('source_path'):
+                with Path(record['source_path']).open('rb') as stored:
+                    if hashlib.file_digest(stored, 'sha256').hexdigest() != cid:
+                        raise PermissionError('Stored upload content changed; upload the exact approved file again')
+            elif hashlib.sha256(record['source'].encode('utf-8')).hexdigest() != cid:
+                raise PermissionError('Stored circuit content changed; upload the exact approved file again')
         except PermissionError as exc:
             raise HTTPException(403, str(exc)) from exc
+        except OSError as exc:
+            raise HTTPException(404, 'Stored upload is no longer available; upload it again') from exc
         return record
 
     from .qbraid_api import create_qbraid_router
-    app.include_router(create_qbraid_router(circuit, settings.root))
+    cloud_ideals = {}
+    def remember_cloud_ideal(cid, record, request, result):
+        probabilities = result.get('ideal_probabilities')
+        if probabilities is None:
+            joint = result.get('joint', [])
+            if not joint or result.get('joint_total', len(joint)) != len(joint):
+                return
+            probabilities = {r['bits']: r['probability'] for r in joint}
+        if not isinstance(probabilities, dict) or not 1 <= len(probabilities) <= 4096:
+            return
+        if abs(sum(probabilities.values()) - 1) > 1e-6:
+            return
+        key = (cid, hashlib.sha256(record['source'].encode()).hexdigest(), request.step, request.step_kind)
+        cloud_ideals[key] = probabilities
+        while len(cloud_ideals) > 32:
+            cloud_ideals.pop(next(iter(cloud_ideals)))
+    def cloud_ideal(cid, prepared):
+        point = prepared['ideal_checkpoint']
+        return cloud_ideals.get((cid, prepared['source_hash'], point['step'], point['step_kind']))
+    app.include_router(create_qbraid_router(circuit, settings.root, get_ideal=cloud_ideal))
 
     def compute(action, payload, timeout=10):
         if not app.state.workers.acquire(blocking=False):
@@ -135,11 +209,17 @@ def create_app(settings=None, model=None):
                 'inspector_fingerprint': p.get('inspector_fingerprint'), 'fallback_reason': p.get('fallback_reason'),
                 'total_instructions': p.get('total_instructions', p['total_steps']),
                 'expanded_state_boundary': p.get('expanded_state_boundary'),
+                'source_bytes': record.get('source_bytes', len(record.get('source', ''))),
+                'full_source_only': p.get('inspection_mode') == 'full_source_only',
                 'warnings': [*p.get('warnings', []), 'Prefix runtime estimates are experimental.', 'No model prediction or state calculation has been run.']}
 
-    def register(data, name):
+    def register(data, name, authorized=None):
+        if len(data) > settings.max_upload_bytes:
+            raise HTTPException(413, f'Upload exceeds the configured {settings.max_upload_bytes:,}-byte inspection limit')
         try:
-            cid, approved = app.state.policy.authorize(data)
+            cid, approved = authorized or app.state.policy.authorize(data)
+            if authorized is not None and hashlib.sha256(data).hexdigest() != cid:
+                raise PermissionError('Staged upload content changed before parsing')
         except PermissionError as exc:
             raise HTTPException(403, str(exc)) from exc
         record = app.state.circuits.get(cid)
@@ -156,23 +236,69 @@ def create_app(settings=None, model=None):
                 # runs directly so terminating a Python worker cannot orphan it.
                 if app.state.inspector_build is None:
                     raise ValueError('Native inspector unavailable at server startup: ' + app.state.inspector_error)
-                parsed = native_parse(source, settings.root, app.state.inspector_build['binary_sha256'])
+                parsed = native_parse(source, settings.root, app.state.inspector_build['binary_sha256'], max_bytes=settings.max_upload_bytes)
                 fallback = None
             except (ValueError, TimeoutError, OSError, KeyError, json.JSONDecodeError) as exc:
                 fallback = f'{type(exc).__name__}: {exc}'
             finally:
                 app.state.workers.release()
             if fallback is not None:
+                if len(data) > PYTHON_FALLBACK_BYTES:
+                    status = 408 if fallback.startswith('TimeoutError:') else 422
+                    raise HTTPException(status, 'Large-file native inspection failed: ' + fallback +
+                                        '. Python SOURCE fallback is limited to 5 MiB; byte acceptance does not increase the 100,000-instruction or 2,048-qubit limits.')
                 parsed, _ = compute('parse', {'qasm': source})
                 parsed.update(inspection_backend='python_source', fallback_reason=fallback)
                 parsed.setdefault('warnings', []).append('SOURCE view: native expansion unavailable. ' + fallback)
             elapsed = time.perf_counter() - started
-            record = {'source': source, 'parsed': parsed, 'origin': approved['origin'], 'name': name, 'parse_seconds': elapsed}
+            record = {'source': source, 'source_bytes': len(data), 'input_hash': cid, 'parsed': parsed, 'origin': approved['origin'], 'name': name, 'parse_seconds': elapsed}
             app.state.circuits.put(cid, record)
+        return summary(cid, record)
+
+    def register_file(path, size, name, authorized):
+        cid, approved = authorized
+        cached = app.state.circuits.get(cid)
+        if cached is not None:
+            return summary(cid, circuit(cid))
+        # Validate UTF-8 incrementally, after content authorization. No line or
+        # statement parsing, string hydration, or Qiskit import for large files.
+        decoder = codecs.getincrementaldecoder('utf-8')('strict')
+        validated_hash = hashlib.sha256()
+        try:
+            with path.open('rb') as source_file:
+                while chunk := source_file.read(1024 * 1024):
+                    validated_hash.update(chunk)
+                    decoder.decode(chunk)
+                decoder.decode(b'', final=True)
+        except UnicodeDecodeError as exc:
+            raise HTTPException(422, 'QASM must be UTF-8 text') from exc
+        if validated_hash.hexdigest() != cid:
+            raise HTTPException(403, 'Staged upload content changed before validation')
+        fallback_reason = None
+        if size <= INTERACTIVE_BYTES:
+            try:
+                return register(path.read_bytes(), name, authorized)
+            except HTTPException as exc:
+                if size <= PYTHON_FALLBACK_BYTES or exc.status_code not in {408, 422}:
+                    raise
+                fallback_reason = exc.detail
+        parsed = {'num_qubits': None, 'num_clbits': None, 'total_steps': 1, 'total_instructions': None,
+                  'state_boundary': None, 'qubit_labels': [], 'steps': [], 'declarations': [],
+                  'inspection_mode': 'full_source_only', 'inspection_backend': 'not_run_large_file',
+                  'fallback_reason': fallback_reason,
+                  'warnings': ['Full circuit mode: interactive inspection is unavailable for this file. Only exact full-source runtime features, prediction and SHAP are available. Syntax, gate counts and qubit counts have not been validated. Diagram, prefixes, state, stepper and cloud execution are unavailable.',
+                               *(['Interactive inspection failed: ' + fallback_reason] if fallback_reason else ['File exceeds the 32 MiB interactive inspection budget.'])]}
+        record = {'source_path': str(path), 'source_bytes': size, 'input_hash': cid, 'parsed': parsed,
+                  'origin': approved['origin'], 'name': name, 'parse_seconds': 0}
+        app.state.circuits.put(cid, record)
         return summary(cid, record)
 
     def selected(cid, request):
         record = circuit(cid)
+        if record['parsed'].get('inspection_mode') == 'full_source_only':
+            if request.step != 1 or request.step_kind != 'source':
+                raise HTTPException(422, 'Large-file mode supports only the Full circuit checkpoint (source step 1); arbitrary prefixes are unavailable')
+            return record, Path(record['source_path'])
         try:
             if request.step_kind == 'expanded':
                 source, _ = expanded_prefix(record['source'], record['parsed'], request.step)
@@ -184,6 +310,10 @@ def create_app(settings=None, model=None):
 
     def checkpoint(record, request, source):
         p = record['parsed']
+        if p.get('inspection_mode') == 'full_source_only':
+            return {'step': 1, 'step_kind': 'source', 'prefix_kind': 'original_full_source',
+                    'checkpoint_label': 'Full circuit', 'input_hash': record['input_hash'],
+                    'prefix_hash': record['input_hash'], 'source_origin': None}
         records = p.get('instructions', []) if request.step_kind == 'expanded' else p['steps']
         origin = records[request.step - 1] if request.step else None
         if request.step_kind == 'expanded':
@@ -191,7 +321,7 @@ def create_app(settings=None, model=None):
         else:
             kind = 'original_full_source' if request.step == p['total_steps'] else 'source_boundary'
         return {'step': request.step, 'step_kind': request.step_kind, 'prefix_kind': kind,
-                'input_hash': hashlib.sha256(record['source'].encode()).hexdigest(),
+                'input_hash': record['input_hash'],
                 'prefix_hash': hashlib.sha256(source.encode()).hexdigest(),
                 'source_origin': ({k: origin[k] for k in ['source', 'line', 'start', 'end']} | {'source_step': origin.get('source_step', request.step)}) if origin else None}
 
@@ -209,8 +339,8 @@ def create_app(settings=None, model=None):
         return result
 
     def cache_identity(record, source):
-        return (hashlib.sha256(record['source'].encode()).hexdigest(),
-                hashlib.sha256(source.encode()).hexdigest(), app.state.model.info.get('fingerprint'))
+        return (record['input_hash'],
+                record['input_hash'] if isinstance(source, Path) else hashlib.sha256(source.encode()).hexdigest(), app.state.model.info.get('fingerprint'))
 
     def validate_threshold(request):
         thresholds = app.state.model.info.get('thresholds')
@@ -227,7 +357,7 @@ def create_app(settings=None, model=None):
         except (OSError, ValueError, KeyError) as exc:
             inspector = {'available': False, 'error': str(exc), 'fallback': 'python_source'}
         return {'ok': True, 'model': app.state.model.info, 'access': {'scope': 'development_only', 'approved_files': len(app.state.policy.entries), 'source': app.state.policy.source},
-                'inspection': inspector, 'limits': {'state_qubits': 12, 'state_operations': 10_000, 'inspection_operations': 100_000, 'inspection_qubits': 2048, 'nesting': 64, 'workers': 2, 'inspection_attempt_timeout_seconds': 10, 'state_timeout_seconds': settings.state_timeout, 'upload_bytes': MAX_BYTES}}
+                'inspection': inspector, 'limits': {'state_qubits': 12, 'state_operations': 10_000, 'inspection_operations': 100_000, 'inspection_qubits': 2048, 'nesting': 64, 'workers': 2, 'inspection_attempt_timeout_seconds': 10, 'state_timeout_seconds': settings.state_timeout, 'upload_bytes': settings.max_upload_bytes, 'interactive_bytes': INTERACTIVE_BYTES, 'python_fallback_bytes': PYTHON_FALLBACK_BYTES, 'large_feature_timeout_seconds': settings.large_feature_timeout, 'large_feature_memory_bytes': settings.large_feature_memory_bytes, 'large_feature_workers': 1, 'native_output_bytes': 64 * 1024 * 1024, 'metadata_preview_chars': 4096}}
 
     @app.get('/api/examples')
     def examples():
@@ -248,24 +378,51 @@ def create_app(settings=None, model=None):
 
     @app.post('/api/circuits')
     async def upload(request: Request, name: str = Query(default='uploaded.qasm', max_length=200)):
-        data = bytearray()
-        async for chunk in request.stream():
-            data.extend(chunk)
-            if len(data) > MAX_BYTES:
-                raise HTTPException(413, 'Upload exceeds the 5 MiB inspection limit')
-        # authorize before parsing, before dispatching any computation.
-        from starlette.concurrency import run_in_threadpool
-        return await run_in_threadpool(register, bytes(data), Path(name).name)
+        digest = hashlib.sha256()
+        length = request.headers.get('content-length')
+        if length and length.isdigit() and int(length) > settings.max_upload_bytes:
+            raise HTTPException(413, f'Upload exceeds the configured {settings.max_upload_bytes:,}-byte inspection limit')
+        path = Path(app.state.upload_directory.name) / (os.urandom(16).hex() + '.qasm')
+        size = 0
+        retained = False
+        if not app.state.upload_workers.acquire(blocking=False):
+            raise HTTPException(429, 'Two uploads are already streaming; try again shortly')
+        try:
+            with path.open('wb') as output:
+                async for chunk in request.stream():
+                    if len(chunk) > settings.max_upload_bytes - size:
+                        raise HTTPException(413, f'Upload exceeds the configured {settings.max_upload_bytes:,}-byte inspection limit')
+                    output.write(chunk)
+                    size += len(chunk)
+                    digest.update(chunk)
+            # authorize before decoding/parsing or dispatching computation.
+            try:
+                authorized = app.state.policy.authorize_digest(digest.hexdigest())
+            except PermissionError as exc:
+                raise HTTPException(403, str(exc)) from exc
+            from starlette.concurrency import run_in_threadpool
+            result = await run_in_threadpool(register_file, path, size, Path(name).name, authorized)
+            cached = app.state.circuits.get(result['id'])
+            retained = cached is not None and cached.get('source_path') == str(path)
+            return result
+        finally:
+            if not retained:
+                path.unlink(missing_ok=True)
+            app.state.upload_workers.release()
 
     @app.get('/api/circuits/{cid}/steps')
     def steps(cid: str, offset: int = Query(0, ge=0), limit: int = Query(80, ge=1, le=200)):
         p = circuit(cid)['parsed']
+        if p.get('inspection_mode') == 'full_source_only':
+            raise HTTPException(422, 'Gate navigation is unavailable in large-file Full circuit mode')
         return {'offset': offset, 'total': p['total_steps'], 'steps': p['steps'][offset:offset + limit]}
 
     @app.get('/api/circuits/{cid}/instructions')
     def instructions(cid: str, offset: int = Query(0, ge=0), limit: int = Query(80, ge=1, le=200)):
         record = circuit(cid)
         p = record['parsed']
+        if p.get('inspection_mode') == 'full_source_only':
+            raise HTTPException(422, 'Instruction navigation is unavailable in large-file Full circuit mode')
         rows = p.get('instructions', p['steps'])
         return {'offset': offset, 'total': len(rows), 'steps': rows[offset:offset + limit],
                 'step_kind': 'expanded' if 'instructions' in p else 'source', 'provenance': provenance(record)}
@@ -274,6 +431,8 @@ def create_app(settings=None, model=None):
     def overview(cid: str, buckets: int = Query(100, ge=1, le=200)):
         record = circuit(cid)
         p = record['parsed']
+        if p.get('inspection_mode') == 'full_source_only':
+            raise HTTPException(422, 'Diagram overview is unavailable in large-file Full circuit mode')
         rows = p.get('instructions', p['steps'])
         width = max(1, (len(rows) + buckets - 1) // buckets)
         return {'total': len(rows), 'step_kind': 'expanded' if 'instructions' in p else 'source',
@@ -294,7 +453,25 @@ def create_app(settings=None, model=None):
                           model_inputs=app.state.model.inputs(cached['features'], request.threshold) if hasattr(app.state.model, 'inputs') else {**cached['features'], **derived})
             return result
         try:
-            values = app.state.model.features(source)
+            if isinstance(source, Path):
+                if not hasattr(app.state.model, 'features_file'):
+                    raise ValueError('This model provider does not support isolated full-file extraction')
+                if not app.state.large_workers.acquire(blocking=False):
+                    raise HTTPException(429, 'One large-file feature calculation is already running; try again shortly')
+                try:
+                    with app.state.file_lock:
+                        app.state.active_files.add(str(source))
+                    values = app.state.model.features_file(source, record['input_hash'], settings.large_feature_timeout,
+                                                          memory_bytes=settings.large_feature_memory_bytes)
+                finally:
+                    with app.state.file_lock:
+                        app.state.active_files.discard(str(source))
+                        if str(source) in app.state.pending_delete:
+                            source.unlink(missing_ok=True)
+                            app.state.pending_delete.discard(str(source))
+                    app.state.large_workers.release()
+            else:
+                values = app.state.model.features(source)
             diagnostics = list(record['parsed'].get('warnings', []))
             for left, right in [('n_qubits', 'st_n_qubits'), ('n_gates', 'st_n_gates'),
                                 ('n_2q', 'st_n_2q'), ('n_measure', 'st_n_measure'), ('n_reset', 'st_n_reset')]:
@@ -306,12 +483,14 @@ def create_app(settings=None, model=None):
                 diagnostics.append('Native parser reports skipped statements, parameter errors, or unknown gates; inspect the st_* counters. Features preserved unchanged.')
             source_steps = (record['parsed'].get('instructions', []) if request.step_kind == 'expanded' else record['parsed']['steps'])[:request.step]
             imported = sum(step['instances'] for step in source_steps)
-            if 'st_n_gates' in values and imported != values['st_n_gates']:
+            if not isinstance(source, Path) and 'st_n_gates' in values and imported != values['st_n_gates']:
                 diagnostics.append(f"Source/imported instruction count {imported} differs from native expanded gate count {values['st_n_gates']}. Custom calls expand; measurement, reset and barriers have separate counters. Features preserved unchanged.")
             result = {'features': values, 'raw_features': values, 'diagnostics': diagnostics,
                       'provenance': provenance(record, values), 'cached': False}
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
+        except TimeoutError as exc:
+            raise HTTPException(408, str(exc)) from exc
         app.state.results.put(cache_key, result)
         derived = app.state.model.derived(values, request.threshold) if hasattr(app.state.model, 'derived') else {}
         return {**result, **metadata, 'threshold': request.threshold, 'derived_features': derived,
@@ -344,6 +523,8 @@ def create_app(settings=None, model=None):
     @app.post('/api/circuits/{cid}/state')
     def state(cid: str, request: Checkpoint):
         record, source = selected(cid, request)
+        if isinstance(source, Path):
+            raise HTTPException(422, 'State calculation is unavailable in large-file Full circuit mode; interactive inspection is limited to 32 MiB')
         boundary = record['parsed'].get('expanded_state_boundary') if request.step_kind == 'expanded' else record['parsed']['state_boundary']
         if boundary is not None and request.step >= boundary:
             raise HTTPException(422, f'State inspection stops before step {boundary}: measurement or reset')
@@ -353,15 +534,19 @@ def create_app(settings=None, model=None):
         key = ('state', *cache_identity(record, source), request.pair)
         cached = app.state.results.get(key)
         if cached is not None:
+            remember_cloud_ideal(cid, record, request, cached)
             return {**cached, **metadata, 'cached': True}
         result, elapsed = compute('state', {'qasm': source, 'pair': list(request.pair)}, settings.state_timeout)
         result.update({**metadata, 'provenance': provenance(record), 'calculation_seconds': elapsed, 'cached': False})
         app.state.results.put(key, result)
+        remember_cloud_ideal(cid, record, request, result)
         return result
 
     @app.post('/api/circuits/{cid}/stepper')
     def stepper(cid: str, request: Checkpoint):
         record, source = selected(cid, request)
+        if isinstance(source, Path):
+            raise HTTPException(422, 'Instruction stepping is unavailable in large-file Full circuit mode')
         validate_threshold(request)
         if not app.state.model.info.get('stepper_available'):
             raise HTTPException(422, 'Native C++ stepper is unavailable for this checkpoint')

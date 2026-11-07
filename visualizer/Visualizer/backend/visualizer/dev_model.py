@@ -119,6 +119,16 @@ class DevModelService:
             raise ValueError('Model extractor returned a non-finite feature')
         return values
 
+    def features_file(self, path, input_hash, timeout=180, memory_bytes=3 * 1024 * 1024 * 1024):
+        """Same pinned adapter, isolated so large inputs cannot exhaust the app."""
+        self.require()
+        self.check_binary()
+        from .workers import run_isolated
+        values, _ = run_isolated('full_file_features', {
+            'source_path': str(path), 'input_hash': input_hash, 'snapshot': self.info['snapshot'],
+            'binary_sha256': self.binary_fingerprint, 'memory_bytes': memory_bytes}, timeout)
+        return values
+
     def predict(self, features, threshold):
         self.require()
         if threshold not in THRESHOLDS:
@@ -172,7 +182,7 @@ class DevModelService:
                                    'cap_seconds': self.module.CAP_SECONDS,
                                    'applied': not math.isclose(output, math.log10(predicted), abs_tol=1e-10)},
                 'contribution_count': len(items), 'contributions': items[:10],
-                'note': 'Mean Tree SHAP across the four members explains the blend before the timeout rule and six-hour cap. Units are log10(seconds), not additive seconds or causal gate costs. The signed top 10 contributions by absolute magnitude are shown; contribution_sum includes every feature. Correlated inputs can share attribution.'}
+                'note': 'Mean Tree SHAP across the four members explains the blend before the timeout rule and six-hour cap. Units are log10(seconds), not additive seconds or causal gate costs. Up to 10 signed contributions by absolute magnitude are shown, or all if fewer are available; contribution_sum includes every feature. Raw features and derived inputs are both eligible. Correlated inputs can share attribution.'}
 
     def trace(self, source, threshold, features):
         self.require()

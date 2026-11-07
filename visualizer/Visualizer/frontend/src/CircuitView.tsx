@@ -4,10 +4,10 @@ export function CircuitView({circuit, steps, selected, select, wireOffset, setWi
   const center = Math.max(1, selected);
   const first = Math.max(1, Math.min(circuit.total_steps - 9, center - 4));
   const visible = steps.filter(s => s.step >= first && s.step < first + 10);
-  const wires = Array.from({length: Math.min(8, circuit.num_qubits - wireOffset)}, (_, i) => wireOffset + i);
+  const wires = Array.from({length: Math.min(8, (circuit.num_qubits ?? 0) - wireOffset)}, (_, i) => wireOffset + i);
   const width = Math.max(620, 108 + visible.length * 86), height = 62 + wires.length * 60;
   return <>
-    <div className="circuit-caption"><span>Source order · custom gates stay collapsed</span>{circuit.num_qubits > 8 ? <label>Qubits <select aria-label="Visible qubit group" value={wireOffset} onChange={e => setWireOffset(Number(e.target.value))}>{Array.from({length: Math.ceil(circuit.num_qubits / 8)}, (_, i) => <option key={i} value={i * 8}>{i * 8}–{Math.min(circuit.num_qubits - 1, i * 8 + 7)}</option>)}</select></label> : <span>Click a gate to inspect</span>}</div>
+    <div className="circuit-caption"><span>Source order · custom gates stay collapsed</span>{(circuit.num_qubits ?? 0) > 8 ? <label>Qubits <select aria-label="Visible qubit group" value={wireOffset} onChange={e => setWireOffset(Number(e.target.value))}>{Array.from({length: Math.ceil((circuit.num_qubits ?? 0) / 8)}, (_, i) => <option key={i} value={i * 8}>{i * 8}–{Math.min((circuit.num_qubits ?? 0) - 1, i * 8 + 7)}</option>)}</select></label> : <span>Click a gate to inspect</span>}</div>
     <div className="circuit-scroll">
       <svg className="circuit-svg" viewBox={`0 0 ${width} ${height}`} style={{minWidth: width}} role="group" aria-label="Interactive quantum circuit">
         <title>Quantum circuit in source order. Select a gate with the mouse or keyboard.</title>

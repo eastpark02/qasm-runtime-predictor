@@ -78,7 +78,7 @@ def test_strict_native_never_silently_approximates(native, tail, reason):
 
 def test_expansion_limit_and_recursion_are_rejected(native):
     definitions = 'gate g0 a { x a; x a; }\n' + ''.join(f'gate g{i} a {{ g{i-1} a; g{i-1} a; }}\n' for i in range(1, 17))
-    with pytest.raises(ValueError, match='100,000'):
+    with pytest.raises(ValueError, match='100,000|metadata exceeds 64 MiB'):
         native(HEADER + definitions + 'qreg q[1];\ng16 q[0];')
     with pytest.raises(ValueError, match='64 levels'):
         native(HEADER + 'gate loop a { loop a; }\nqreg q[1];\nloop q[0];')

@@ -10,7 +10,7 @@ import pytest
 
 from visualizer.circuits import parse, load_qiskit
 from visualizer.qbraid_api import create_qbraid_router
-from visualizer.qbraid_service import CloudError, CloudService, SDKAdapter, load_profiles, normalize_counts, prepare_program
+from visualizer.qbraid_service import CloudError, CloudService, SDKAdapter, device_summary, load_profiles, normalize_counts, prepare_program
 
 
 SOURCE = 'OPENQASM 2.0; include "qelib1.inc"; qreg q[2]; creg c[2]; x q[0]; h q[1];'
@@ -39,7 +39,7 @@ class Remote:
         self.calls.append('estimate')
         if self.error:
             raise RuntimeError('Credentials rejected: must never leak simulated-api-key')
-        return {'pricingAvailable': self.pricing_available, 'estimatedCost': self.cost, 'reason': None if self.pricing_available else 'Dynamic pricing unavailable'}
+        return {'deviceQrn': did, 'shots': shots, 'pricingAvailable': self.pricing_available, 'estimatedCost': self.cost, 'reason': None if self.pricing_available else 'Dynamic pricing unavailable'}
 
     def submit(self, did, program, shots, rid):
         self.submissions += 1
@@ -118,6 +118,71 @@ def test_quote_balance_and_device_shot_estimate_then_exhaustion_blocks_without_s
         service.submit(request, prepared)
     assert error.value.status == 402
     assert a.submissions == b.submissions == 0 and not b.calls
+
+
+@pytest.mark.parametrize('qrn,provider,route', [
+    ('aws:ionq:qpu:forte-1', 'IonQ', 'Amazon Braket'),
+    ('ionq:ionq:qpu:forte-1', 'IonQ', 'IonQ'),
+    ('openquantum:ionq:qpu:forte-1', 'IonQ', 'Open Quantum'),
+    ('aws:aws:sim:sv1', 'Amazon Braket', 'Amazon Braket'),
+])
+def test_catalogue_distinguishes_device_provider_from_submission_route(qrn, provider, route):
+    row = device_summary({**Remote().device(qrn), 'vendor': qrn.split(':')[0]})
+    assert row['provider_name'] == provider and row['route_name'] == route
+
+
+def test_catalogue_is_live_visible_metadata_not_execution_entitlement(cloud):
+    service, a, b, *_ = cloud
+    original = a.device
+    rows = [
+        original('aws:ionq:qpu:forte-1'),
+        {**original('ionq:ionq:qpu:forte-1'), 'status': 'UNAVAILABLE'},
+        {**original('aws:aws:sim:tn1'), 'status': 'RETIRED'},
+        {**original('analog'), 'paradigm': 'analog'},
+        {**original('indirect'), 'directAccess': False},
+    ]
+    a.devices = lambda: rows
+    catalog = service.devices('a')
+    assert [d['id'] for d in catalog['devices']] == ['aws:ionq:qpu:forte-1', 'ionq:ionq:qpu:forte-1']
+    assert 'not confirmed account execution access' in catalog['note']
+    rows.clear()
+    refreshed = service.devices('a')
+    assert refreshed['devices'] == [] and refreshed['checked_at'] >= catalog['checked_at']
+    assert a.submissions == b.submissions == 0 and 'estimate' not in a.calls
+
+
+def test_permission_denied_estimate_does_not_imply_catalogue_or_hardware_error(cloud):
+    service, a, b, prepared, selected, *_ = cloud
+    def denied(*_):
+        error = RuntimeError('must-never-echo-provider-secret')
+        error.response = SimpleNamespace(status_code=403)
+        raise error
+    a.estimate = denied
+    with pytest.raises(CloudError, match='Catalogue visibility and ONLINE status') as error:
+        service.quote(selected, prepared)
+    assert 'provider-secret' not in str(error.value)
+    assert a.submissions == b.submissions == 0 and not b.calls
+
+
+@pytest.mark.parametrize('changed', [{'deviceQrn': 'other:device'}, {'shots': 999}])
+def test_estimate_must_match_requested_device_and_shots(cloud, changed):
+    service, a, _, prepared, selected, *_ = cloud
+    original = a.estimate
+    a.estimate = lambda did, shots: {**original(did, shots), **changed}
+    with pytest.raises(CloudError, match='different device or shot count'):
+        service.quote(selected, prepared)
+    assert a.submissions == 0
+
+
+def test_forte_api_credit_quote_is_preserved_without_claiming_execution_access(cloud):
+    service, a, _, prepared, selected, *_ = cloud
+    # Captured API rate is 30/task + 8/shot credits: a 100-shot estimate is 830.
+    a.cost = 830
+    quote = service.quote({**selected, 'device_id': 'aws:ionq:qpu:forte-1'}, prepared)
+    assert quote['estimated_cost'] == 830 and quote['estimated_remaining'] == 1170
+    assert quote['device']['provider_name'] == 'IonQ'
+    assert 'not a guarantee of execution access' in quote['note']
+    assert a.submissions == 0
 
 
 def test_credentials_failure_never_falls_back_or_leaks_secret(cloud):
@@ -340,3 +405,112 @@ def test_http_quote_submit_and_result_flow_mocked_remote(cloud):
         assert response.json()['counts'] == {'01': 52, '11': 48}
         assert len(client.get('/api/qbraid/jobs').json()['jobs']) == 1
         assert authorized == ['cid', 'cid']
+
+
+def test_local_connection_validates_real_balance_without_estimate_or_submission(cloud):
+    service, a, b, prepared, selected, *_ = cloud
+    connected = service.connect('secret-a')
+    pid = connected['profile']['id']
+    assert pid.startswith('session_') and connected['wallet']['credits'] == 2000
+    assert connected['profile']['session'] and connected['profile']['configured']
+    assert a.calls == ['balance'] and a.submissions == b.submissions == 0
+    assert not b.calls
+    assert b'secret-a' not in service.db_path.read_bytes()
+    assert 'secret-a' not in json.dumps(service.profile_list())
+    # Catalogue kinds remain explicit, including physical hardware.
+    original_device = a.device
+    a.devices = lambda: [{**original_device('mock:qpu'), 'deviceType': 'QPU'}]
+    assert service.devices(pid)['devices'][0]['kind'] == 'QPU'
+    quote = service.quote({**selected, 'profile_id': pid, 'device_id': 'mock:qpu'}, prepared)
+    assert quote['estimated_cost'] == 7.5 and quote['estimated_remaining'] == 1992.5
+    assert a.submissions == 0
+
+
+def test_disconnect_revokes_quote_pauses_jobs_and_reconnect_is_bound_to_original_wallet(cloud):
+    service, a, b, prepared, selected, factory, profiles, _ = cloud
+    pid = service.connect('secret-a')['profile']['id']
+    selected = {**selected, 'profile_id': pid}
+    request = submission(service, selected, prepared)
+    service.submit(request, prepared)
+    service.disconnect(pid)
+    assert service._read('quotes', request['quote_id']) is None
+    assert not next(p for p in service.profile_list()['profiles'] if p['id'] == pid)['configured']
+    a.calls.clear()
+    with pytest.raises(CloudError, match='disconnected or server restarted'):
+        service.refresh(request['request_id'])
+    assert 'status' not in a.calls and 'reconcile' not in a.calls
+    restarted = CloudService(service.root, factory, profiles)
+    with pytest.raises(CloudError, match='different wallet'):
+        restarted.connect('secret-b', pid)
+    assert pid not in restarted.clients and 'status' not in b.calls
+    restored = restarted.connect('secret-a', pid)
+    assert restored['profile']['id'] == pid
+    assert restarted.refresh(request['request_id'])['state'] == 'QUEUED'
+    with pytest.raises(CloudError, match='Disconnect'):
+        restarted.connect('secret-a', pid)
+    assert a.submissions == 1
+
+
+@pytest.mark.parametrize('phase', ['constructor', 'balance'])
+def test_connect_sdk_errors_even_cloud_errors_never_echo_key(tmp_path, phase):
+    secret = 'fake-sensitive-connect-key'
+    class BadRemote:
+        def balance(self):
+            raise CloudError(secret)
+    def factory(token):
+        if phase == 'constructor':
+            raise CloudError(token)
+        return BadRemote()
+    service = CloudService(tmp_path, factory, [])
+    app = FastAPI()
+    app.include_router(create_qbraid_router(lambda _: None, tmp_path, service))
+    with TestClient(app) as client:
+        response = client.post('/api/qbraid/connect', json={'api_key': secret})
+        assert response.status_code == 502 and secret not in response.text
+        assert response.headers['cache-control'] == 'no-store'
+        assert client.get('/api/qbraid/profiles').json()['profiles'] == []
+    assert secret.encode() not in service.db_path.read_bytes()
+
+
+@pytest.mark.parametrize('data', [
+    {'api_key': 'private key'}, {'api_key': 'private-key-' * 500},
+    {'api_key': ['private-key']}, {'api_key': {'private-key': True}},
+    {'api_key': 'private-key', 'unexpected': 'private-key'},
+    {'api_key': 'private-key', 'profile_id': ['private-key']},
+])
+def test_secret_bearing_validation_is_bounded_and_never_serializes_input(tmp_path, data):
+    service = CloudService(tmp_path, lambda _: pytest.fail('Invalid input reached SDK'), [])
+    app = FastAPI()
+    app.include_router(create_qbraid_router(lambda _: None, tmp_path, service))
+    with TestClient(app) as client:
+        response = client.post('/api/qbraid/connect', json=data)
+        assert response.status_code == 422 and 'private' not in response.text
+        assert response.headers['cache-control'] == 'no-store'
+        response = client.post('/api/qbraid/connect', content='{"api_key":"private-key"')
+        assert response.status_code == 422 and 'private' not in response.text
+        response = client.post('/api/qbraid/connect', content='private-key' * 1000)
+        assert response.status_code == 422 and 'private' not in response.text
+
+
+def test_session_connection_count_is_bounded(cloud):
+    service, a, *_ = cloud
+    for _ in range(8):
+        service.connect('secret-a')
+    with pytest.raises(CloudError) as exc:
+        service.connect('secret-a')
+    assert exc.value.status == 429 and len(a.calls) == 8
+
+
+def test_restart_revokes_session_quote_and_named_profile_cannot_override_session_binding(cloud):
+    service, a, _, prepared, selected, factory, profiles, _ = cloud
+    pid = service.connect('secret-a')['profile']['id']
+    selected = {**selected, 'profile_id': pid}
+    request = submission(service, selected, prepared)
+    restarted = CloudService(service.root, factory, profiles)
+    assert restarted._read('quotes', request['quote_id']) is None
+    restarted.connect('secret-a', pid)
+    with pytest.raises(CloudError, match='does not match'):
+        restarted.submit(request, prepared)
+    with pytest.raises(CloudError, match='conflicts'):
+        CloudService(service.root, factory, [{'id': pid, 'label': 'Reused', 'api_key_env': 'PROFILE_A'}])
+    assert a.submissions == 0

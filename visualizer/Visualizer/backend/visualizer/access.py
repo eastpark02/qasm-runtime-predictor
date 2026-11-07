@@ -27,7 +27,9 @@ class AccessPolicy:
             self.source = payload.get("source", "development manifest")
 
     def authorize(self, data: bytes) -> tuple[str, dict]:
-        key = digest(data)
+        return self.authorize_digest(digest(data))
+
+    def authorize_digest(self, key: str) -> tuple[str, dict]:
         if key not in self.entries:
             raise PermissionError("Upload rejected: this exact file is not on the development/synthetic allowlist. Renaming a file does not approve it. Audit circuits are excluded.")
         return key, self.entries[key]

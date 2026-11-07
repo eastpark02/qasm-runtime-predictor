@@ -23,7 +23,7 @@ export function CircuitExplorer({circuit, stepKind, selected, select, nearby}: {
   const pointers = useRef(new Map<number, {x: number; y: number; startX: number; startY: number}>());
   const suppressClick = useRef(false);
   const total = totalFor(circuit, stepKind);
-  const worldWidth = Math.max(1, total) * COLUMN, worldHeight = Math.max(1, circuit.num_qubits) * ROW;
+  const worldWidth = Math.max(1, total) * COLUMN, worldHeight = Math.max(1, (circuit.num_qubits ?? 0)) * ROW;
   const selectedStep = nearby.find(s => s.step === selected) || visible.find(s => s.step === selected);
   const bounded = useCallback((value: Camera): Camera => ({...value,
     x: clamp(value.x, 0, Math.max(0, worldWidth - (size.width - LEFT) / value.zoom)),
@@ -101,12 +101,22 @@ export function CircuitExplorer({circuit, stepKind, selected, select, nearby}: {
     if (!element) return;
     const wheel = (event: WheelEvent) => {
       event.preventDefault();
-      const rect = element.getBoundingClientRect();
-      zoomAt(Math.exp(-event.deltaY * .0015), event.clientX - rect.left, event.clientY - rect.top);
+      // Chromium exposes trackpad pinch as ctrl-wheel; ordinary two-finger
+      // scrolling must move through wires and gates without changing scale.
+      const unitX = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? size.width : 1;
+      const unitY = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? size.height : 1;
+      if (event.ctrlKey) {
+        const rect = element.getBoundingClientRect();
+        zoomAt(Math.exp(-event.deltaY * unitY * .0015), event.clientX - rect.left, event.clientY - rect.top);
+      } else if (!overview) {
+        const dx = event.shiftKey && !event.deltaX ? event.deltaY * unitY : event.deltaX * unitX;
+        const dy = event.shiftKey && !event.deltaX ? 0 : event.deltaY * unitY;
+        setCamera(c => bounded({...c, x: c.x + dx / c.zoom, y: c.y + dy / c.zoom}));
+      }
     };
     element.addEventListener('wheel', wheel, {passive: false});
     return () => element.removeEventListener('wheel', wheel);
-  }, [zoomAt]);
+  }, [zoomAt, bounded, overview, size]);
 
   useEffect(() => {
     if (!expanded) return;
@@ -153,17 +163,26 @@ export function CircuitExplorer({circuit, stepKind, selected, select, nearby}: {
         const before = Math.hypot(previous.x - other.x, previous.y - other.y);
         const after = Math.hypot(event.clientX - other.x, event.clientY - other.y);
         const rect = event.currentTarget.getBoundingClientRect();
-        if (before > 4) zoomAt(after / before, (event.clientX + other.x) / 2 - rect.left, (event.clientY + other.y) / 2 - rect.top);
+        if (before > 4) setCamera(c => {
+          const zoom = clamp(c.zoom * after / before, .4, 3);
+          // Keep the world point below the old midpoint below the new one.
+          // This supports simultaneous pinch and translation, including a
+          // two-finger swipe with no net scale change.
+          return bounded({zoom,
+            x: c.x + ((previous.x + other.x) / 2 - rect.left - LEFT) / c.zoom - ((event.clientX + other.x) / 2 - rect.left - LEFT) / zoom,
+            y: c.y + ((previous.y + other.y) / 2 - rect.top - TOP) / c.zoom - ((event.clientY + other.y) / 2 - rect.top - TOP) / zoom,
+          });
+        });
       }
     } else setCamera(c => bounded({...c, x: c.x - (event.clientX - previous.x) / c.zoom, y: c.y - (event.clientY - previous.y) / c.zoom}));
     pointers.current.set(event.pointerId, {...previous, x: event.clientX, y: event.clientY});
   }
   const firstWire = Math.max(0, Math.floor(camera.y / ROW));
-  const wires = Array.from({length: Math.min(circuit.num_qubits - firstWire, Math.ceil((size.height - TOP) / camera.zoom / ROW) + 1)}, (_, i) => firstWire + i);
+  const wires = Array.from({length: Math.min((circuit.num_qubits ?? 0) - firstWire, Math.ceil((size.height - TOP) / camera.zoom / ROW) + 1)}, (_, i) => firstWire + i);
   const displayed = visible.filter(s => s.step > first && s.step <= last);
-  return <section ref={panel} className={`panel circuit-panel circuit-explorer ${expanded ? 'circuit-expanded' : ''}`} role={expanded ? 'dialog' : undefined} aria-modal={expanded || undefined} aria-label={expanded ? 'Fullscreen circuit explorer' : 'Circuit explorer'}>
+  return <section id="circuit-checkpoint" tabIndex={-1} ref={panel} className={`panel circuit-panel circuit-explorer ${expanded ? 'circuit-expanded' : ''}`} role={expanded ? 'dialog' : undefined} aria-modal={expanded || undefined} aria-label={expanded ? 'Fullscreen circuit explorer' : 'Circuit explorer'}>
     <div className="panel-heading"><div><div className="eyebrow">CIRCUIT EXPLORER</div><h2>{circuit.name}</h2></div><span className="tag"><Check size={12}/>{circuit.origin === 'synthetic' ? 'Synthetic example' : 'Approved development'}</span></div>
-    <div className="circuit-stats"><span><strong>{circuit.num_qubits}</strong> qubits</span><span><strong>{total.toLocaleString()}</strong> {stepKind === 'expanded' ? 'expanded instructions' : 'source steps'}</span><span>{circuit.parse_seconds.toFixed(2)} s parse</span><span className="inspection-badge">{stepKind === 'expanded' ? 'C++ inspection · dev' : 'Python source view'}</span></div>
+    <div className="circuit-stats"><span><strong>{(circuit.num_qubits ?? 0)}</strong> qubits</span><span><strong>{total.toLocaleString()}</strong> {stepKind === 'expanded' ? 'expanded instructions' : 'source steps'}</span><span>{circuit.parse_seconds.toFixed(2)} s parse</span><span className="inspection-badge">{stepKind === 'expanded' ? 'C++ inspection · dev' : 'Python source view'}</span></div>
     {circuit.fallback_reason ? <p className="inspection-fallback" role="status">Python fallback: {circuit.fallback_reason}</p> : null}
     <div className="viewport-toolbar" aria-label="Circuit view controls">
       <button className="button" onClick={() => zoomAt(1 / 1.25, size.width / 2, size.height / 2)} aria-label="Zoom out"><ZoomOut size={15}/></button>
@@ -174,17 +193,17 @@ export function CircuitExplorer({circuit, stepKind, selected, select, nearby}: {
       <button className="button" onClick={() => {setOverview(false); setCamera({x: 0, y: 0, zoom: 1});}} aria-label="Reset circuit view"><RotateCcw size={15}/></button>
       <button ref={fullscreenButton} className="button fullscreen-control" onClick={() => void toggleFullscreen()} aria-label={expanded ? 'Exit fullscreen' : 'View circuit fullscreen'}>{expanded ? <Minimize2 size={15}/> : <Maximize2 size={15}/>}<span>{expanded ? 'Exit fullscreen' : 'Fullscreen'}</span></button>
     </div>
-    <div ref={viewport} className="circuit-viewport" style={expanded ? undefined : {height: Math.min(440, Math.max(220, TOP + circuit.num_qubits * ROW + 40))}}>
+    <div ref={viewport} className="circuit-viewport" style={expanded ? undefined : {height: Math.min(440, Math.max(220, TOP + (circuit.num_qubits ?? 0) * ROW + 40))}}>
       <svg role="group" aria-label="Interactive quantum circuit" viewBox={`0 0 ${size.width} ${size.height}`} onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={e => pointers.current.delete(e.pointerId)} onPointerCancel={e => pointers.current.delete(e.pointerId)} onClickCapture={e => {if (suppressClick.current) {e.preventDefault(); e.stopPropagation();}}}>
-        <title>{overview ? 'Whole circuit overview. Click a location to explore its gates.' : 'Drag the background to pan. Scroll or pinch to zoom. Select gates to inspect.'}</title>
+        <title>{overview ? 'Whole circuit overview. Click a location to explore its gates.' : 'Scroll through qubits and gates, or drag to pan. Pinch or Ctrl+scroll to zoom. Select gates to inspect.'}</title>
         {overview ? <g role="button" tabIndex={0} aria-label="Explore circuit overview" onClick={e => {
           const rect = e.currentTarget.ownerSVGElement!.getBoundingClientRect();
           const fraction = clamp((e.clientX - rect.left - LEFT) / (size.width - LEFT - 20), 0, 1);
           const target = clamp(Math.floor(fraction * total) + 1, 0, total);
-          select(target); focusSelected(target, Math.floor(clamp((e.clientY - rect.top - TOP) / (size.height - TOP - 36), 0, .9999) * circuit.num_qubits));
+          select(target); focusSelected(target, Math.floor(clamp((e.clientY - rect.top - TOP) / (size.height - TOP - 36), 0, .9999) * (circuit.num_qubits ?? 0)));
         }} onKeyDown={e => {if (e.key === 'Enter' || e.key === ' ') {e.preventDefault(); focusSelected();}}}>
           <rect x={LEFT} y={TOP} width={size.width - LEFT - 20} height={size.height - TOP - 36} rx={8} className="overview-background"/>
-          {Array.from({length: Math.min(32, circuit.num_qubits)}, (_, q) => <line key={q} x1={LEFT} x2={size.width - 20} y1={TOP + 12 + q * (size.height - TOP - 60) / Math.max(1, Math.min(32, circuit.num_qubits) - 1)} y2={TOP + 12 + q * (size.height - TOP - 60) / Math.max(1, Math.min(32, circuit.num_qubits) - 1)} className="wire"/>)}
+          {Array.from({length: Math.min(32, (circuit.num_qubits ?? 0))}, (_, q) => <line key={q} x1={LEFT} x2={size.width - 20} y1={TOP + 12 + q * (size.height - TOP - 60) / Math.max(1, Math.min(32, (circuit.num_qubits ?? 0)) - 1)} y2={TOP + 12 + q * (size.height - TOP - 60) / Math.max(1, Math.min(32, (circuit.num_qubits ?? 0)) - 1)} className="wire"/>)}
           {overviewData?.buckets?.slice(0, 200).map((bucket, i) => <rect key={i} x={LEFT + bucket.start / Math.max(1,total) * (size.width - LEFT - 20)} y={TOP + 8} width={Math.max(1, (bucket.end - bucket.start) / Math.max(1,total) * (size.width - LEFT - 20))} height={size.height - TOP - 52} className="overview-density" opacity={Math.min(.55, .12 + Math.log1p(bucket.count) / 30)}/>)}
           <line x1={LEFT + selected / Math.max(1,total) * (size.width - LEFT - 20)} x2={LEFT + selected / Math.max(1,total) * (size.width - LEFT - 20)} y1={TOP} y2={size.height - 36} className="overview-cursor"/>
           <text x={LEFT} y={size.height - 12} className="wire-label">1</text><text x={size.width - 20} y={size.height - 12} textAnchor="end" className="wire-label">{total.toLocaleString()} instructions</text>
@@ -210,11 +229,11 @@ export function CircuitExplorer({circuit, stepKind, selected, select, nearby}: {
       </svg>
       {loadError ? <div className="viewport-error" role="alert">{loadError}</div> : null}
     </div>
-    <div className="viewport-position"><span>{overview ? 'Overview shows the full extent; click to open detail.' : 'Drag background to pan · wheel/pinch to zoom'}</span>{circuit.num_qubits > 6 ? <label>First visible qubit <input aria-label="First visible qubit" type="number" min={0} max={Math.max(0,circuit.num_qubits - 1)} value={firstWire} onChange={e => {setOverview(false); setCamera(c => bounded({...c, y: clamp(Number(e.target.value), 0, circuit.num_qubits - 1) * ROW}));}}/></label> : null}</div>
+    <div className="viewport-position"><span>{overview ? 'Overview shows the full extent; click to open detail.' : 'Scroll through qubits ↕ and gates ↔ · drag to pan · pinch / Ctrl+scroll to zoom'}</span>{(circuit.num_qubits ?? 0) > 6 ? <label>First visible qubit <input aria-label="First visible qubit" type="number" min={0} max={Math.max(0,(circuit.num_qubits ?? 0) - 1)} value={firstWire} onChange={e => {setOverview(false); setCamera(c => bounded({...c, y: clamp(Number(e.target.value), 0, (circuit.num_qubits ?? 0) - 1) * ROW}));}}/></label> : null}</div>
     <div className="navigator"><div className="navigation-buttons"><button className="icon-button" aria-label="Previous step" disabled={selected === 0} onClick={() => select(selected - 1)}><ArrowLeft size={18}/></button><span>Step <strong>{selected}</strong> / {total.toLocaleString()}</span><button className="icon-button" aria-label="Next step" disabled={selected === total} onClick={() => select(selected + 1)}><ArrowRight size={18}/></button></div><input className="step-slider" aria-label="Circuit step" type="range" min={0} max={total} value={selected} onChange={e => select(Number(e.target.value))}/><label className="jump-label">Go to<input aria-label="Jump to step" type="number" min={0} max={total} value={selected} onChange={e => {const value = Number(e.target.value); if (Number.isFinite(value)) select(clamp(Math.trunc(value), 0, total));}}/></label></div>
     <div className="instruction-detail"><div><span className="field-label">{selectedStep ? `SOURCE · LINE ${selectedStep.line}${selectedStep.source_step ? ` · SOURCE STEP ${selectedStep.source_step}` : ''}` : selected ? 'LOADING INSTRUCTION' : 'INITIAL STATE'}</span><code>{selectedStep?.primitive_source || selectedStep?.source || (selected ? 'Loading selected instruction…' : 'All qubits initialized to |0⟩. No operations applied.')}</code>{selectedStep?.primitive_source && selectedStep.primitive_source !== selectedStep.source ? <p className="source-origin">Original: {selectedStep.source}</p> : null}</div>{selectedStep ? <span className="operand-label">{selectedStep.qubits.map(q => `q${q}`).join(', ')}{selectedStep.clbits?.length ? ` → ${selectedStep.clbits.map(q => `c${q}`).join(', ')}` : ''}</span> : null}</div>
     {selectedStep?.parameters?.length ? <div className="parameter-values">{selectedStep.parameters.map((p,i) => <span key={i}>Angle {i + 1}: {p.value !== null ? `${p.value.toFixed(6)} radians` : p.expression}</span>)}</div> : null}
-    {selectedStep?.body ? <details className="gate-body"><summary>Inspect custom gate body</summary><pre>{selectedStep.body}</pre></details> : null}
+    {selectedStep?.body ? <details className="gate-body"><summary>Inspect custom gate body{selectedStep.body_truncated ? ' · first 4,096 characters' : ''}</summary><pre>{selectedStep.body}</pre></details> : null}
     {!expanded ? <details className="instruction-trace"><summary>Instruction trace <span>{nearby.length} nearby instructions</span></summary><div className="trace-table"><table><thead><tr><th>Step</th><th>Gate</th><th>Qubits</th><th>Source</th></tr></thead><tbody>{nearby.map(s => <tr key={s.step} className={s.step === selected ? 'active-row' : ''}><td><button onClick={() => select(s.step)}>{s.step}</button></td><td>{s.name.toUpperCase()}</td><td>{s.qubits.join(', ')}</td><td><code>{s.primitive_source || s.source}</code></td></tr>)}</tbody></table></div></details> : null}
   </section>;
 }

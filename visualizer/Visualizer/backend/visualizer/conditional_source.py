@@ -5,6 +5,7 @@ import or a claim that every written branch executes.
 """
 from bisect import bisect_left
 import re
+from .limits import preview
 
 
 def parse_conditionals(source, declarations, operations, definitions):
@@ -118,9 +119,9 @@ def parse_conditionals(source, declarations, operations, definitions):
         angles = re.match(r'\w+\s*\(([^;{}]*)\)', span.text) if name != 'if_else' else None
         steps.append({'step': index + 1, 'name': name, 'qubits': qs, 'clbits': cs,
                       'parameters': [], 'angle_expression': angles[1] if angles else '',
-                      'source': source[span.start:span.end], 'line': bisect_left(lines, span.start) + 1,
+                      'source': preview(source[span.start:span.end]), 'source_truncated': span.end-span.start > 4096, 'line': bisect_left(lines, span.start) + 1,
                       'start': span.start, 'end': span.end, 'op_start': cursor, 'op_end': cursor + width,
-                      'instances': width, 'body': definitions.get(name),
+                      'instances': width, 'body': preview(definitions.get(name)), 'body_truncated': len(definitions.get(name, '')) > 4096,
                       'state_boundary': name in {'measure', 'reset', 'if_else'}})
         cursor += width
     return {'num_qubits': len(qubits), 'num_clbits': len(clbits), 'total_steps': len(steps),
