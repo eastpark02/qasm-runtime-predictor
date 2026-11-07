@@ -97,8 +97,8 @@ def calculate_selected(payload):
     # Legacy pair defaults on a one-qubit circuit still inspect its only qubit.
     if circuit.num_qubits == 1 and selected == [0, 1] and 'qubits' not in payload:
         selected = [0]
-    if not 1 <= len(selected) <= 2 or len(set(selected)) != len(selected) or any(type(q) is not int or q < 0 or q >= circuit.num_qubits for q in selected):
-        raise ValueError('Choose one qubit or two different qubits from this circuit')
+    if not 1 <= len(selected) <= 3 or len(set(selected)) != len(selected) or any(type(q) is not int or q < 0 or q >= circuit.num_qubits for q in selected):
+        raise ValueError('Choose one to three different qubits from this circuit')
     method = payload.get('method', 'auto')
     if method not in {'auto', 'stabilizer', 'statevector', 'matrix_product_state'}:
         raise ValueError('Unknown state method')

@@ -55,7 +55,7 @@ export default function App() {
   function opened(value: Circuit) {
     generation.current += 1;
     setBusy(''); setStateBusy(false);
-    setCircuit(value); setStep(value.full_source_only ? 1 : 0); setSteps([]); setResult(null); setPredictions([]); setFeatureResult(null); setExplanations({}); setExplainErrors({}); setExplaining(new Set()); explanationSequence.current.clear(); setStateOptions({qubits: [0], method: 'auto', include_joint: false, mps_max_bond: 64, mps_cutoff: 1e-10}); setError('');
+    setCircuit(value); setStep(value.full_source_only ? 1 : 0); setSteps([]); setResult(null); setPredictions([]); setFeatureResult(null); setExplanations({}); setExplainErrors({}); setExplaining(new Set()); explanationSequence.current.clear(); setStateOptions({qubits: (value.num_qubits ?? 0) >= 3 ? [0, 1, 2] : [0], method: 'auto', include_joint: false, mps_max_bond: 64, mps_cutoff: 1e-10}); setError('');
   }
   async function openExample() {
     setLoading(true); setError('');

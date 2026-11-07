@@ -1,5 +1,5 @@
 param(
-    [string]$Predictor = (Join-Path $PSScriptRoot '../../quantum-runtime-prediction-model/qasm-runtime-predictor'),
+    [string]$Predictor = (Join-Path $PSScriptRoot '../../..'),
     [string]$Zig = '',
     [switch]$Force
 )

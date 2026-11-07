@@ -1,6 +1,7 @@
 import {useState} from 'react';
 import {ChartNoAxesColumnIncreasing, Clock3, FlaskConical, TriangleAlert} from 'lucide-react';
 import {seconds} from './api';
+import {featureLabel, gateCountSummary, matchesFeature} from './featureLabels';
 import type {Explanation, FeatureResult, ModelInfo, Prediction, StepKind} from './types';
 import './runtime.css';
 
@@ -55,7 +56,8 @@ export function RuntimeDetails({step, stepKind, threshold, featureResult, model,
   const [filter, setFilter] = useState(''), [featureView, setFeatureView] = useState<'raw' | 'derived'>('raw');
   const raw = featureResult?.features;
   const values = featureView === 'raw' ? raw : featureResult?.derived_features;
-  const keys = Object.keys(values || {}).filter(k => k.toLowerCase().includes(filter.toLowerCase())).sort();
+  const keys = Object.keys(values || {}).filter(k => matchesFeature(k, filter)).sort();
+  const gateCounts = raw ? gateCountSummary(raw) : null;
   const staleFeatures = !!featureResult && (featureResult.step !== step || (featureResult.step_kind || 'source') !== stepKind || (featureResult.threshold !== undefined && featureResult.threshold !== threshold));
   const bars = [...(explanation?.contributions || [])].sort((a,b) => Math.abs(b.contribution)-Math.abs(a.contribution)).slice(0,10);
   const maximum = Math.max(...bars.map(c => Math.abs(c.contribution)), .00000001);
@@ -74,8 +76,9 @@ export function RuntimeDetails({step, stepKind, threshold, featureResult, model,
         <p className="small muted">Showing {bars.length} of {contributionCount} model inputs.{contributionCount !== undefined && contributionCount < 10 ? ' All available contributions are shown.' : ''}</p>
         {!bars.length ? <p role="status" className="shap-status">No SHAP contributions were returned for this checkpoint.</p> : <div className="shap-legend"><span className="decrease">Lower estimate</span><span className="increase">Higher estimate</span></div>}
         {bars.map(c => <div className="shap-row" key={c.feature}>
-          <div className="shap-label"><code title={c.feature}>{c.feature}</code><span title="Input value">{format(c.value)}</span></div>
-          <div className="shap-bar-line"><div className="shap-track" role="img" aria-label={`${c.feature}, input ${c.value}, contribution ${c.contribution >= 0 ? '+' : ''}${c.contribution.toFixed(5)} log10 seconds`}>{c.contribution !== 0 ? <span className={`shap-bar ${c.contribution >= 0 ? 'positive' : 'negative'}`} style={{width:`${Math.abs(c.contribution)/maximum*49}%`,left:`${c.contribution >= 0 ? 50 : 50-Math.abs(c.contribution)/maximum*49}%`}}/> : null}</div><strong>{c.contribution >= 0 ? '+' : ''}{c.contribution.toFixed(3)}</strong></div>
+          <div className="shap-label"><div className="feature-name"><strong>{featureLabel(c.feature).title}</strong><code title={c.feature}>{c.feature}</code></div><span title="Input value">{format(c.value)}</span></div>
+          <p className="feature-description">{featureLabel(c.feature).description}</p>
+          <div className="shap-bar-line"><div className="shap-track" role="img" aria-label={`${featureLabel(c.feature).title}, input ${c.value}, contribution ${c.contribution >= 0 ? '+' : ''}${c.contribution.toFixed(5)} log10 seconds`}>{c.contribution !== 0 ? <span className={`shap-bar ${c.contribution >= 0 ? 'positive' : 'negative'}`} style={{width:`${Math.abs(c.contribution)/maximum*49}%`,left:`${c.contribution >= 0 ? 50 : 50-Math.abs(c.contribution)/maximum*49}%`}}/> : null}</div><strong>{c.contribution >= 0 ? '+' : ''}{c.contribution.toFixed(3)}</strong></div>
         </div>)}
         <p className="small muted">Baseline {explanation.base_value.toFixed(3)} → raw output {explanation.output.toFixed(3)} log₁₀(s){remaining !== null ? `. Other inputs: ${remaining >= 0 ? '+' : ''}${remaining.toFixed(3)}.` : '.'}</p>
         {explanation.postprocessing_applied ? <p className="prefix-warning">The model’s timeout rule or runtime cap changed the final prediction. These bars explain the raw blend before that adjustment.</p> : null}
@@ -84,13 +87,22 @@ export function RuntimeDetails({step, stepKind, threshold, featureResult, model,
     <section className="panel features-panel" aria-labelledby="circuit-features-heading"><div className="panel-heading"><div><div className="eyebrow">MODEL INPUTS</div><h2 id="circuit-features-heading">All circuit features</h2></div></div>
       <button className="button full" onClick={inspect} disabled={!!busy || !model?.available}>{busy === 'features' ? 'Extracting…' : 'Inspect features here'}</button>
       {featureResult ? <><p className="small muted">Step {featureResult.step} · {featureResult.step_kind || 'source'}{featureResult.threshold !== undefined ? ` · threshold ${featureResult.threshold}` : ''}{staleFeatures ? ' · previous checkpoint' : ''}</p><p className="small muted">Structural features: {featureEngine(featureResult)}</p>
+        <section className="gate-count-summary" aria-labelledby="gate-count-heading">
+          <h3 id="gate-count-heading">Gate counts at this checkpoint</h3>
+          <p className="small muted">{fullCircuit ? 'Full circuit' : `${featureResult.step_kind || 'source'} step ${featureResult.step}`}{staleFeatures ? ' · previous checkpoint — inspect again to update' : ''}. {gateCounts ? `${gateCounts.source} reports expanded gates, including custom-gate bodies and register broadcasts.` : 'Gate counts are unavailable in this extraction.'}</p>
+          {gateCounts ? <><dl className="gate-count-list">{gateCounts.rows.map(row => <div key={row.key}><dt>{row.title}</dt><dd>{row.value === null ? 'Unavailable' : format(row.value)}</dd></div>)}</dl><p className="small muted">The three qubit-count categories partition the total. Measurements, resets and barriers are excluded. Counts are extractor-reported and are not independently validated.</p>
+          {(raw?.n_param_gates !== undefined || raw?.n_nonclifford !== undefined) && <details className="gate-count-extra"><summary>Overlapping gate categories</summary><dl className="gate-count-list">{['n_param_gates','n_nonclifford'].filter(key => Number.isFinite(raw?.[key]) && raw![key] >= 0).map(key => <div key={key}><dt title={featureLabel(key).description}>{featureLabel(key).title}</dt><dd>{format(raw![key])}</dd></div>)}</dl><p className="small muted">These categories can overlap each other and the qubit-count categories. Do not add them to the total. Non-Clifford classification uses gate names and generic angles.</p></details>}
+          </> : null}
+          {raw?.st_ok !== undefined && (raw.st_ok !== 1 || !!raw.st_truncated || !!raw.st_n_skipped_stmts || !!raw.st_n_unknown_gates || !!raw.st_n_param_parse_err) ? <p className="prefix-warning">Structural extraction is partial, uses a fallback, or reports parser limitations. Structural counts may be incomplete; inspect extraction diagnostics below.</p> : null}
+          {raw && Number.isFinite(raw.n_gates) && Number.isFinite(raw.st_n_gates) && raw.n_gates !== raw.st_n_gates ? <p className="prefix-warning">Extractors disagree: source total {format(raw.n_gates)}; structural total {format(raw.st_n_gates)}. The list above uses one extractor and does not combine their counts.</p> : null}
+        </section>
         <div className="feature-tabs" aria-label="Feature category"><button aria-pressed={featureView === 'raw'} onClick={() => setFeatureView('raw')}>Raw features ({Object.keys(raw || {}).length})</button><button aria-pressed={featureView === 'derived'} onClick={() => setFeatureView('derived')}>Derived inputs ({Object.keys(featureResult.derived_features || {}).length})</button></div>
         <p className="small muted">Derived inputs supplement the raw features. SHAP ranks the model’s combined inputs; the derived input count does not limit the chart.</p>
-        <label className="sr-only" htmlFor="feature-filter">Filter features</label><input id="feature-filter" className="text-input" placeholder="Filter features…" value={filter} onChange={e => setFilter(e.target.value)}/>
-        <div className="feature-table"><table><thead><tr><th>Feature</th><th>Value</th></tr></thead><tbody>{keys.map(key => <tr key={key}><td>{key}</td><td>{format(values![key])}</td></tr>)}</tbody></table>{!keys.length ? <p className="small muted">{values ? 'No matching features.' : 'Derived inputs are unavailable for this result.'}</p> : null}</div>
+        <label className="sr-only" htmlFor="feature-filter">Filter features</label><input id="feature-filter" className="text-input" placeholder="Search titles or feature identifiers…" value={filter} onChange={e => setFilter(e.target.value)}/>
+        <div className="feature-table"><table><thead><tr><th>Feature and meaning</th><th>Value</th></tr></thead><tbody>{keys.map(key => <tr key={key}><td><div className="feature-name"><strong>{featureLabel(key).title}</strong><code>{key}</code></div><p className="feature-description">{featureLabel(key).description}</p></td><td>{format(values![key])}</td></tr>)}</tbody></table>{!keys.length ? <p className="small muted">{values ? 'No matching features.' : 'Derived inputs are unavailable for this result.'}</p> : null}</div>
         {featureResult.diagnostics?.length ? <details className="explain-details"><summary>Extraction diagnostics</summary>{featureResult.diagnostics.map((text,i) => <p className="small muted" key={i}>{text}</p>)}</details> : null}
       </> : <p className="small muted">Inspect all extracted values without requesting a prediction.</p>}
-      <details className="explain-details"><summary>Global feature importance</summary>{importance.available ? <><p className="small">Development validation · {importance.metric}</p>{importance.rows?.map(r => <div className="attribution" key={r.feature}><span>{r.feature}</span><strong>{r.importance.toFixed(4)}</strong></div>)}</> : <p className="small muted">{importance.note || 'No approved development-validation report is installed.'}</p>}</details>
+      <details className="explain-details"><summary>Global feature importance</summary>{importance.available ? <><p className="small">Development validation · {importance.metric}</p>{importance.rows?.map(r => <div className="attribution" key={r.feature}><div className="feature-name" title={featureLabel(r.feature).description}><strong>{featureLabel(r.feature).title}</strong><code>{r.feature}</code></div><strong>{r.importance.toFixed(4)}</strong></div>)}</> : <p className="small muted">{importance.note || 'No approved development-validation report is installed.'}</p>}</details>
     </section>
   </div>;
 }
