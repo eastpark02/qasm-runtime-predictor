@@ -39,14 +39,19 @@ export default function App() {
     });
     return () => controller.abort();
   }, []);
-  const offset = Math.max(0, Math.floor(Math.max(0, step - 1) / 50) * 50 - 10);
+  // Windowed inspection: keep the nearby trace inside the selected step's
+  // statement window so a jump inspects only that window.
+  const windowSize = circuit?.inspection_mode === 'windowed' ? circuit.window_size || 100000 : 0;
+  const windowStart = windowSize ? Math.floor(Math.max(0, step - 1) / windowSize) * windowSize : 0;
+  const offset = Math.max(windowStart, Math.floor(Math.max(0, step - 1) / 50) * 50 - 10);
+  const nearbyLimit = windowSize ? Math.min(80, windowStart + windowSize - offset) : 80;
   useEffect(() => {
     if (!circuit || circuit.full_source_only) return;
     const controller = new AbortController();
     const endpoint = stepKind === 'expanded' ? 'instructions' : 'steps';
-    api<{steps: Step[]}>(`/circuits/${circuit.id}/${endpoint}?offset=${offset}&limit=80`, undefined, controller.signal).then(r => {if (!controller.signal.aborted) setSteps(r.steps);}).catch(e => {if (!controller.signal.aborted) setError(e.message);});
+    api<{steps: Step[]}>(`/circuits/${circuit.id}/${endpoint}?offset=${offset}&limit=${nearbyLimit}`, undefined, controller.signal).then(r => {if (!controller.signal.aborted) setSteps(r.steps);}).catch(e => {if (!controller.signal.aborted) setError(e.message);});
     return () => controller.abort();
-  }, [circuit, offset, stepKind]);
+  }, [circuit, offset, nearbyLimit, stepKind]);
   function opened(value: Circuit) {
     generation.current += 1;
     setBusy(''); setStateBusy(false);
