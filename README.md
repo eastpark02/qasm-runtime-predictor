@@ -1,146 +1,278 @@
-# Quantum circuit runtime pipeline
+# QASM Runtime Predictor
 
-This package predicts simulation duration from OpenQASM circuit content and the
-simulator threshold. It does not simulate quantum circuits. Its models use
-numeric structure features and log-runtime regression; filenames are join keys
-only and never become model inputs.
+Predict execution time for OpenQASM 2.0 and 3.0 circuits from their source
+structure. The project combines a streaming parser, an MPS-inspired gate
+stepper, structural circuit fingerprints, and an ensemble of gradient-boosted
+regressors.
 
-The companion `ML-Agent` controller owns the frozen grouped validation protocol,
-research loop, independent reviews, model promotion, and stopping rule. Use its
-evaluation reports for model comparisons. The local `train` command fits all
-supplied labels and does **not** produce an unbiased validation score.
+The shipped model predicts runtime for a circuit/threshold pair in seconds.
+It is designed for the Quantum Rings IQC 2026 runtime-prediction challenge,
+but the parser and feature pipeline are useful independently.
 
-## Run locally
+## Highlights
 
-Install with Python 3.12 using `python -m pip install -e .`. From this project:
+- **OpenQASM 2.0 and 3.0 parsing** without constructing a Qiskit circuit object.
+- **Streaming feature extraction** for registers, gates, depth, interactions,
+  conditional operations, measurements, resets, custom gates, and parameters.
+- **Custom-gate support**, including nested calls and register broadcasting.
+- **C++20 moment stepper** that expands custom gates and estimates
+  threshold-dependent MPS bond-dimension cost gate by gate.
+- **Pure-Python fallback** when the native stepper is unavailable, fails, or
+  reaches its deadline.
+- **Structure fingerprints** for QFT, adders, Sycamore-style layers, GHZ
+  chains, Grover-like repetition, Bernstein-Vazirani oracles, arithmetic
+  multi-controlled gates, layer periods, and hashed gate motifs.
+- **Compressed input support** for `.qasm.zst` files during dataset feature
+  generation.
+- **Cross-validated model training** with circuit-grouped folds, timeout-aware
+  scoring, threshold-derived features, and a four-member log-space blend.
+- **Harness-ready submission bundle** containing the model, feature code, and
+  native stepper.
 
-```powershell
-python -m unittest discover -s tests -v
-python -m runtime_pipeline features --qasm path\circuit.qasm.zst
-python -m runtime_pipeline train --circuits path\train-circuits --labels path\train-runtime-data.csv
-python -m runtime_pipeline predict --qasm path\circuit.qasm.zst --threshold 256
-python -m runtime_pipeline benchmark --circuits path\raw-circuits --largest 3
+## Results
+
+The checked-in artifact reports five-fold `GroupKFold` cross-validation by
+circuit filename:
+
+| Model | Official CV score |
+| --- | ---: |
+| Median runtime per threshold | 0.2841 |
+| Base feature model | 0.8193 |
+| Shipped `blend4` | **0.8401** |
+
+The report covers 2,648 rows from 532 circuits. Scores use the challenge
+metric, `max(0, 1 - abs(log10(predicted / actual)))`, with timeout labels
+represented by the six-hour cap of 21,600 seconds. See
+[`artifacts/cv_report.json`](artifacts/cv_report.json) for the complete
+breakdown by threshold and QASM version, and
+[`docs/EXPERIMENTS.md`](docs/EXPERIMENTS.md) for ablations and known limits.
+
+## Repository layout
+
+| Path | Purpose |
+| --- | --- |
+| [`qasm_features.py`](qasm_features.py) | Streaming OpenQASM feature extractor and CLI |
+| [`qasm_step.py`](qasm_step.py) | Native-stepper wrapper, timeout handling, and fallback selection |
+| [`qasm_step_py.py`](qasm_step_py.py) | Pure-Python stepper with the native feature contract |
+| [`build_features.py`](build_features.py) | Parallel `.qasm`/`.qasm.zst` feature generation |
+| [`train.py`](train.py) | Training, cross-validation, blending, and artifact export |
+| [`submission/model.py`](submission/model.py) | Harness entry point: featurize and predict |
+| [`stepper/qasm_step.cpp`](stepper/qasm_step.cpp) | Portable C++20 parser and MPS-style moment stepper |
+| [`stepper/`](stepper/) | Native build scripts, CMake project, token survey, and stepper reference |
+| [`features.csv`](features.csv) | Checked-in example feature matrix |
+| [`artifacts/model.pkl`](artifacts/model.pkl) | Shipped serialized `blend4` model |
+| [`artifacts/cv_report.json`](artifacts/cv_report.json) | Metrics and model metadata for the shipped artifact |
+| [`docs/EXPERIMENTS.md`](docs/EXPERIMENTS.md) | Detailed experiment log and limitations |
+| [`docs/ONE_PAGER.md`](docs/ONE_PAGER.md) | Concise technical summary |
+| [`install_into_harness.sh`](install_into_harness.sh) | Copies the submission bundle into the challenge harness |
+
+## Requirements
+
+- Python 3.9 or newer recommended
+- A C++20 compiler and CMake 3.16 or newer for the native stepper
+- Python packages listed in [`requirements.txt`](requirements.txt)
+- `qiskit` is optional and is only needed for parser validation experiments
+
+Install the Python dependencies:
+
+```bash
+python -m venv .venv
+# Linux/macOS:
+source .venv/bin/activate
+# Windows PowerShell:
+# .venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
 ```
 
-`model_config.json` controls the estimator. Supported initial kinds are `median`,
-`extra_trees`, and `hist_gradient_boosting`. The agent loop can propose additional
-implementations, subject to its reviewer and evaluator gates. Learned feature
-vocabulary and imputation are fit separately inside each training call.
+## Build the native stepper
 
-## Harness interface
+The wrapper searches for `qasm_step`/`qasm_step.exe` in `stepper/`,
+`stepper/build/Release/`, `stepper/build/`, and the project root.
 
-The root `model.py` exports `RuntimeModel`. The unchanged official harness calls
-`RuntimeModel()`, `featurize(qasm_text)`, and `predict(features, threshold)`.
-The default trained file is `artifacts/model.joblib`; pass an explicit artifacts
-directory to use another reviewed checkpoint. Only load local trusted artifacts.
-The model clips all training targets and all predictions to `[1e-9, 21600]`
-seconds; tree regressors fit `log10` of the clipped targets. This global model
-policy is separate from official timeout scoring. The official scorer uses
-21,600 seconds as the actual duration on timeout rows and caps predictions at
-21,600 only on those rows. Successful rows use their measured duration. It floors
-predictions at `1e-9`, scores `max(0, 1 - abs(log10(pred / actual)))`, and gives
-missing predictions zero credit. The candidate's global clipping does not alter
-those scorer rules.
+### Windows PowerShell
 
-## Feature definitions and limitations
-
-The parser recognizes common QASM 2/3 declarations, indexed and register-wide
-operands, comments, parameterized gates, and custom gate definitions. Its
-histogram branch depends on the number of characters after comment replacement,
-not the file's bytes or compressed size. Each matched comment becomes one space.
-At **at most 8,000,000 comment-stripped characters**, it scans complete written
-bodies and recursively composes recognized calls to custom definitions without
-constructing a decomposed circuit. Unused definitions do not contribute to that
-branch's gate histogram, though definition-summary features still include them.
-
-At **more than 8,000,000 comment-stripped characters**, histograms sample the
-written source, including unused gate-definition bodies and custom-call tokens.
-Three windows near the beginning, middle, and end share a 1,500,000-character
-budget, trimmed to semicolon boundaries. Counts are scaled by the ratio of full
-source semicolons to sampled semicolons. These are written-body estimates: they
-do not resolve custom-call multiplicities or certify executed-operation counts.
-Unknown/custom names are pooled, never exposed as identity features. Main-text
-features use the suffix after the last gate definition, so earlier main
-statements can be omitted; register declarations are scanned across the whole
-text. `gate_histogram_sample_fraction` records sampled text coverage.
-`expanded_counts_complete` is the existing **size-branch indicator**: 1 for the
-smaller branch and 0 for the larger branch. Its name does not certify executed
-operations, control flow, resolved syntax, or complete broadcast multiplicities.
-
-Counts are static. Recognized gates in both sides of a conditional are included;
-measurement outcomes are not predicted. Loops are not executed or unrolled, and
-written bodies are not multiplied by iteration counts. Conditional and loop
-keywords also have separate count features. Gate parameters are not evaluated.
-
-Dependency analysis uses at most 1,500,000 characters in the same three-window
-scheme and stops at 25,000 recognized operation instances across all windows.
-Each broadcast instance counts separately; a custom-call instance is not a full
-primitive expansion. A broadcast exceeding the remaining budget contributes
-only its processed prefix to depth, qubit usage, and graph features.
-`dependency_sample_fraction` estimates the fraction of main-text characters
-covered, weighting a partial statement by its processed broadcast fraction. It
-includes text that is not a recognized operation and is not an operation-coverage
-or syntax-completeness measure.
-
-Register-wide histogram correction is applied only in the smaller branch when
-dependency text coverage equals 1. Otherwise `n_ops`, `gate_*`, and derived
-histograms retain uncorrected statement-based broadcast counts, which can
-undercount operations. Even full coverage only corrects broadcasts recognized
-by the parser. For example, a final `cx a,b;` on two 25,001-qubit registers reaches
-the 25,000-instance budget, leaving `gate_cx=1` and
-`expanded_counts_complete=1` despite incomplete broadcast coverage.
-
-Depth and graph measures are proxies. Custom gates use an operation-count/arity
-depth cost; multi-operand interactions use a chain projection. Sample windows
-have independent dependency state; their maximum depth is divided by the text
-coverage fraction. Graph statistics describe sampled interactions and include
-isolated declared qubits. These are neither exact circuit depth nor a full
-executed interaction graph. `clifford_fraction_lower_bound` and
-`nonclifford_count_upper_bound` retain historical names but classify recognized
-gate names. Rotation angles are not symbolically classified. Sampling, unused
-bodies, static branches, and incomplete broadcast correction mean these values
-are not rigorous lower/upper bounds for the executed circuit.
-
-This is a structural feature parser, not a complete QASM validator/interpreter:
-arbitrary classical control flow, aliases, symbolic register sizes, and gate
-modifiers are not expanded. Unresolved dependency operands are reported as a
-feature. Malformed headers, register indices encountered in dependency analysis,
-and recursive definitions reached by small-branch expansion are rejected;
-unexamined text is not fully validated. Included files are never executed or
-fetched. No cache of circuit identities or source algorithms is part of inference.
-
-Compressed reading uses zstandard streaming decompression, matching the official
-harness's frame requirements. Keep raw and compressed copies in separate folders
-to avoid duplicate circuit records.
-
-## Candidate-local timing evidence
-
-Run the dedicated measurement script with the controller's public development
-packet and its supplied Python environment:
+With Visual Studio Build Tools and CMake on `PATH`:
 
 ```powershell
-python validation/measure_baseline.py --development-inputs path\development\inputs.json
+PowerShell -ExecutionPolicy Bypass -File .\stepper\build.ps1
 ```
 
-It fits the unchanged 400-tree configuration with seeds 42 and 43 using only the
-packet's fold-0 training labels and circuit mapping. Timing artifacts are stored
-under `validation/baseline-03-timing/seed-*/model.joblib`, separate from
-`artifacts/model.joblib`. No validation metric is computed.
+With MinGW:
 
-The report records training and benchmark counts, input sizes, configuration,
-parser latency, every singleton `RuntimeModel.predict` latency, and failures.
-The benchmark covers high-qubit broadcasts, both text-size boundaries, a large
-comment, static control flow, and every controller-designated benchmark circuit.
-Reading/decompression, input construction, model loading, and report writing are
-outside parser and prediction timers, matching the official call boundaries.
-The parser and each singleton prediction have separate 15-second caps. Repeated
-local measurements establish results for these cases and this environment;
-they do not certify all possible QASM inputs or validation accuracy.
+```powershell
+$env:CMAKE_GENERATOR = "MinGW Makefiles"
+PowerShell -ExecutionPolicy Bypass -File .\stepper\build.ps1
+```
 
-The recorded step-03 run passed all 21 focused tests, 63 benchmark parser calls,
-and 630 singleton predictions, with no measured failures. Maximum latencies were
-2.100591 seconds for benchmark parsing, 2.620055 seconds for training-feature
-parsing, and 0.163276 seconds for singleton prediction. See the
-[evidence summary](validation/baseline-03-summary.md),
-[full timing report](validation/baseline-03-timing/report.json), and
-[test and integrity checks](validation/baseline-03-checks.json).
+If switching CMake generators, remove `stepper\build\` first. The script
+copies the resulting executable to `stepper\qasm_step.exe`.
+
+### Linux/macOS/Git Bash
+
+```bash
+./stepper/build.sh
+```
+
+The build scripts use the same release CMake configuration and copy the
+resulting binary next to the source files.
+
+## Use the parser and stepper
+
+Extract static features from one or more circuits:
+
+```bash
+python qasm_features.py path/to/circuit.qasm
+```
+
+Run the native stepper:
+
+```bash
+stepper/qasm_step --thresholds 16,64,256,512,1024 path/to/circuit.qasm
+stepper/qasm_step --trace path/to/circuit.qasm
+```
+
+The final native-stepper output line is a flat JSON object containing numeric
+`st_*` fields. `--trace` additionally prints one line per expanded primitive
+gate, which is useful for validating bond-dimension updates and costs.
+
+Python API examples:
+
+```python
+from qasm_features import featurize
+from qasm_step import step_features
+
+text = open("circuit.qasm", encoding="utf-8").read()
+static = featurize(text)
+stepper = step_features(text, deadline_s=12.0)
+print(static["n_qubits"], static["n_gates"])
+print(stepper["st_log10_cost_1024"])
+```
+
+`qasm_step.step_features()` never raises for normal operational failures. It
+uses the native result when valid and otherwise returns the Python fallback.
+The fallback marks its status in `st_ok`: `1.0` native success, `0.75`
+completed fallback, `0.5` deadline-limited fallback, `0.25` no-gate deadline
+guess, and `0.0` fallback failure.
+
+## Generate a feature matrix
+
+The generator reads `.qasm` and `.qasm.zst` files from one directory, processes
+them in parallel, and writes one CSV row per circuit:
+
+```bash
+python build_features.py \
+  --circuits ../quantumrings-challenge-iqc-2026/raw-circuits \
+  --out features.csv \
+  --workers 8 \
+  --fallback-frac 0.03
+```
+
+The fallback fraction is deterministic by filename hash, which makes it
+possible to exercise both implementations consistently. Native stepping starts
+before static parsing when the input is an uncompressed file so the work can
+overlap.
+
+The feature matrix contains:
+
+- Static parser features such as `n_gates`, `n_2q`, depth, interaction
+  distance, cut-crossing counts, entanglement capacity, and log transforms.
+- Stepper features such as `st_log10_cost_<threshold>`, endpoint costs,
+  saturation, realized entangling updates, basis-state fractions, and
+  fingerprints.
+- A 64-bin hashed 3-gram motif vector (`st_motif_0` through `st_motif_63`)
+  plus motif entropy and concentration.
+
+## Train and evaluate
+
+Training labels must contain `filename`, `threshold`, `duration_s`, and
+`status` columns. Timeout rows are converted to `log10(21600)` targets.
+
+Train the shipped blended model:
+
+```bash
+python train.py \
+  --features features.csv \
+  --labels ../quantumrings-challenge-iqc-2026/train-runtime-data.csv \
+  --out artifacts \
+  --blend \
+  --folds 5 \
+  --jobs 8
+```
+
+The training code groups all thresholds for a filename into the same fold,
+preventing circuit leakage. The default blend averages four HGB regressors in
+log10 space:
+
+1. Static/base features without monotonic constraints.
+2. Static plus stepper features.
+3. Stepper features with a selected threshold cost and monotonic constraint.
+4. Stepper features with cost-normalized features.
+
+Structural-twin features are implemented for investigation but are disabled
+for the shipped artifact because they reduced cross-validation performance.
+Use `--no-twin` to make that choice explicit. The non-blended baseline can be
+trained with the script's single-model options; run `python train.py --help`
+for the complete CLI.
+
+## Run the submission model
+
+`submission/model.py` exposes `RuntimeModel`, which loads
+`artifacts/model.pkl`, validates the native stepper with a smoke circuit, and
+provides:
+
+```python
+from submission.model import RuntimeModel
+
+model = RuntimeModel()
+features = model.featurize(qasm_text)
+seconds = model.predict(features, threshold=1024)
+```
+
+Predictions are capped at 21,600 seconds. If any blend member predicts at
+least 60% of the cap, the model predicts the timeout cap. Native stepper
+failures are reported to stderr and use the Python fallback where possible;
+model loading fails early if the required native binary is missing or broken.
+
+To install the complete bundle into the challenge harness:
+
+```bash
+./install_into_harness.sh ../quantumrings-challenge-iqc-2026/submission-harness
+```
+
+The script copies `model.py`, both parsers, the trained artifact, and the
+available native binary. Build the binary first; otherwise installation
+completes with a warning and the harness model will reject startup.
+
+## Validate a holdout circuit set
+
+Before a holdout run, survey statement and parameter tokens:
+
+```bash
+python stepper/survey_tokens.py ../holdout-circuits
+```
+
+The expected success message is `OK: no unknown tokens`. The survey is a
+coverage gate, not a correctness proof: it checks observed identifiers against
+the maintained known-token list and recognizes custom gates defined in each
+file.
+
+## Compatibility and limitations
+
+- The native parser is portable C++20 and supports OpenQASM 2/3 constructs
+  used by the challenge corpus, including custom gates, modifiers, conditionals,
+  and parameter expressions.
+- Unsupported statement blocks are skipped and counted in
+  `st_n_skipped_stmts`; unknown gates are counted in
+  `st_n_unknown_gates`.
+- Native expansion is capped at 200 million primitive gates and custom-gate
+  recursion at depth 64.
+- The Python fallback intentionally emits zero for native-only family and motif
+  fingerprints and may scale or guess cost features when its deadline expires.
+- The stepper models declared qubit order and long-range gates as cut updates;
+  it is a runtime proxy, not a physical quantum simulator.
+- Short, heavily entangled circuits and timeout rows remain difficult cases.
+  See [`docs/ONE_PAGER.md`](docs/ONE_PAGER.md) for the measured error profile.
+
+## License
+
+This project is released under the [MIT License](LICENSE).
