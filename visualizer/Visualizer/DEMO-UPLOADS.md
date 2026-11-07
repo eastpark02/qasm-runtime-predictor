@@ -59,7 +59,13 @@ What you get while it is on:
   "Unlisted uploads allowed", and `/api/health` reports
   `access.scope = "unrestricted"`, `access.allow_unlisted = true`.
 - Turning it off again revokes every unlisted circuit already uploaded: their next
-  action returns 403 and their cached results are not served.
+  action returns 403 and their cached results are not served. They are not evicted,
+  so turning the switch back on makes them reachable again.
+- Cloud (qBraid) execution stays refused for unlisted circuits even while the
+  switch is on, so unvetted content never goes to a provider.
+- The switch state lives in the server process. A restart returns to the env
+  default, so for a demo machine that may be restarted, set the env var rather
+  than relying on the footer toggle.
 
 Demo rule: turn it on for the demo machine only, and turn it off before anyone
 evaluates against audit circuits.
