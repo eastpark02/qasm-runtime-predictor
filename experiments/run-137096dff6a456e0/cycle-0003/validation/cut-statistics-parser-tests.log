@@ -1,0 +1,29 @@
+test_broadcast_operation_budget_and_partial_final_statement (test_parser.ParserTests.test_broadcast_operation_budget_and_partial_final_statement) ... ok
+test_called_custom_broadcast_preserves_histogram_and_graph (test_parser.ParserTests.test_called_custom_broadcast_preserves_histogram_and_graph) ... ok
+test_conditional_blocks_count_static_branches (test_parser.ParserTests.test_conditional_blocks_count_static_branches) ... ok
+test_cut_custom_bodies_do_not_weight_or_expand_spans (test_parser.ParserTests.test_cut_custom_bodies_do_not_weight_or_expand_spans) ... ok
+test_cut_empty_singleton_and_excluded_operands (test_parser.ParserTests.test_cut_empty_singleton_and_excluded_operands) ... ok
+test_cut_features_preserve_all_prechange_feature_snapshots (test_parser.ParserTests.test_cut_features_preserve_all_prechange_feature_snapshots) ... ok
+test_cut_measurements_preserve_existing_budget_behavior (test_parser.ParserTests.test_cut_measurements_preserve_existing_budget_behavior) ... ok
+test_cut_offsets_full_and_mixed_broadcasts (test_parser.ParserTests.test_cut_offsets_full_and_mixed_broadcasts) ... ok
+test_cut_pairs_distinguish_previously_identical_features (test_parser.ParserTests.test_cut_pairs_distinguish_previously_identical_features) ... ok
+test_cut_partial_broadcast_in_both_histogram_branches (test_parser.ParserTests.test_cut_partial_broadcast_in_both_histogram_branches) ... ok
+test_cut_repetition_higher_arity_and_duplicates (test_parser.ParserTests.test_cut_repetition_higher_arity_and_duplicates) ... ok
+test_cut_static_control_flow_and_order_invariance (test_parser.ParserTests.test_cut_static_control_flow_and_order_invariance) ... ok
+test_cut_windows_aggregate_without_coverage_scaling (test_parser.ParserTests.test_cut_windows_aggregate_without_coverage_scaling) ... ok
+test_degree_moments_include_isolated_qubits (test_parser.ParserTests.test_degree_moments_include_isolated_qubits) ... ok
+test_degree_statistics_use_bounded_number_of_array_traversals (test_parser.ParserTests.test_degree_statistics_use_bounded_number_of_array_traversals) ... ok
+test_exhausted_budget_stops_later_statements_and_windows (test_parser.ParserTests.test_exhausted_budget_stops_later_statements_and_windows) ... ok
+test_fast_path_declares_approximation_and_keeps_early_registers (test_parser.ParserTests.test_fast_path_declares_approximation_and_keeps_early_registers) ... ok
+test_histogram_branch_at_exact_size_boundary (test_parser.ParserTests.test_histogram_branch_at_exact_size_boundary) ... ok
+test_large_sample_is_explicit_and_histograms_remain_exact (test_parser.ParserTests.test_large_sample_is_explicit_and_histograms_remain_exact) ... ok
+test_malformed_or_recursive_programs_rejected (test_parser.ParserTests.test_malformed_or_recursive_programs_rejected) ... ok
+test_partial_broadcast_does_not_apply_complete_histogram_correction (test_parser.ParserTests.test_partial_broadcast_does_not_apply_complete_histogram_correction) ... ok
+test_qasm2_inline_comments_and_register_broadcast (test_parser.ParserTests.test_qasm2_inline_comments_and_register_broadcast) ... ok
+test_qasm3_nested_custom_gates_only_called_definitions (test_parser.ParserTests.test_qasm3_nested_custom_gates_only_called_definitions) ... ok
+test_scalar_qubits_and_parallel_depth (test_parser.ParserTests.test_scalar_qubits_and_parallel_depth) ... ok
+
+----------------------------------------------------------------------
+Ran 24 tests in 21.560s
+
+OK

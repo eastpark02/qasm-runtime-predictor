@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+artifacts/
+experiments/
+.worktrees/
+data/
+.cache/
+cache/
+RESULTS.md
+parser_validation.json
+*.csv
+.test-tmp/

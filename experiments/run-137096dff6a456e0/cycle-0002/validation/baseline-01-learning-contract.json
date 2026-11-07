@@ -1,0 +1,239 @@
+{
+  "run_id": "iqc-2026-runtime",
+  "cycle_id": "cycle-0001",
+  "step_id": "step-00-attempt-0-code",
+  "role": "coder",
+  "manager_step_id": "baseline-01-validate-learning-contract",
+  "changed_paths": [
+    "tests/test_learning.py",
+    "validation/baseline-01-learning-contract.json"
+  ],
+  "change_summary": "Strengthened existing learning tests and added focused log-target clipping and prediction-alignment tests. Production implementation, parser, configuration, dependencies, and official scripts remain unchanged.",
+  "coverage": [
+    "Fixed 400-tree/min_samples_leaf=2/max_features=1.0/n_jobs=4 ExtraTrees fixtures verify parameter forwarding and seeds 42/43.",
+    "Asymmetric synthetic training features distinguish median from mean imputation; all-nonfinite columns use the installed imputer's zero fallback. Numeric threshold and log2_threshold remain in the training vocabulary.",
+    "Before/after joblib hashes cover the full fitted estimator, vocabulary, imputer statistics, tree state, threshold medians and global median across extreme held-out values, novel keys, unseen thresholds and missing features. Training predictions also remain stable.",
+    "Median baseline clips seconds before threshold/global aggregation; shuffled prediction thresholds verify alignment and unseen-threshold fallback.",
+    "Known constant tree leaves verify log10 training and reconstruction of clipped seconds, including targets below 1e-9 and above the six-hour cap.",
+    "Median and tree estimators round-trip through joblib and root model.RuntimeModel; batch and scalar adapter predictions agree. Missing artifacts raise FileNotFoundError.",
+    "Both baseline estimator kinds return finite float arrays in [1e-9,21600], including empty output, and reject mismatched inference counts.",
+    "Inspected public parameter names, root adapter identity and optional artifacts_dir default remain as supplied."
+  ],
+  "test_runs": [
+    {
+      "stage": "existing suite before edits",
+      "command": "& 'C:/Users/apier/OneDrive/Documents/Code/QuantumRings/ML-Agent/.venv/Scripts/python.exe' -m unittest discover -s tests -v",
+      "exit_code": 0,
+      "tests_run": 12,
+      "unittest_elapsed_seconds": 0.752,
+      "command_wall_time_seconds": 5.3972043,
+      "output": "test_hist_gradient_boosting (test_learning.LearningTests.test_hist_gradient_boosting) ... ok\r\ntest_identity_and_invalid_targets_rejected (test_learning.LearningTests.test_identity_and_invalid_targets_rejected) ... ok\r\ntest_learning_vocabulary_is_training_fold_local (test_learning.LearningTests.test_learning_vocabulary_is_training_fold_local) ... ok\r\ntest_median_thresholds_and_unseen_fallback (test_learning.LearningTests.test_median_thresholds_and_unseen_fallback) ... ok\r\ntest_trees_serialization_and_harness_contract (test_learning.LearningTests.test_trees_serialization_and_harness_contract) ... ok\r\ntest_conditional_blocks_count_static_branches (test_parser.ParserTests.test_conditional_blocks_count_static_branches) ... ok\r\ntest_fast_path_declares_approximation_and_keeps_early_registers (test_parser.ParserTests.test_fast_path_declares_approximation_and_keeps_early_registers) ... ok\r\ntest_large_sample_is_explicit_and_histograms_remain_exact (test_parser.ParserTests.test_large_sample_is_explicit_and_histograms_remain_exact) ... ok\r\ntest_malformed_or_recursive_programs_rejected (test_parser.ParserTests.test_malformed_or_recursive_programs_rejected) ... ok\r\ntest_qasm2_inline_comments_and_register_broadcast (test_parser.ParserTests.test_qasm2_inline_comments_and_register_broadcast) ... ok\r\ntest_qasm3_nested_custom_gates_only_called_definitions (test_parser.ParserTests.test_qasm3_nested_custom_gates_only_called_definitions) ... ok\r\ntest_scalar_qubits_and_parallel_depth (test_parser.ParserTests.test_scalar_qubits_and_parallel_depth) ... ok\r\n\r\n----------------------------------------------------------------------\r\nRan 12 tests in 0.752s\r\n\r\nOK\r\n"
+    },
+    {
+      "stage": "expanded suite before asymmetric imputation fixture",
+      "command": "& 'C:/Users/apier/OneDrive/Documents/Code/QuantumRings/ML-Agent/.venv/Scripts/python.exe' -m unittest discover -s tests -v",
+      "exit_code": 0,
+      "tests_run": 14,
+      "unittest_elapsed_seconds": 1.792,
+      "command_wall_time_seconds": 5.2667749,
+      "output": "test_hist_gradient_boosting (test_learning.LearningTests.test_hist_gradient_boosting) ... ok\r\ntest_identity_and_invalid_targets_rejected (test_learning.LearningTests.test_identity_and_invalid_targets_rejected) ... ok\r\ntest_median_clips_before_aggregation_and_unseen_fallback (test_learning.LearningTests.test_median_clips_before_aggregation_and_unseen_fallback) ... ok\r\ntest_prediction_counts_and_alignment (test_learning.LearningTests.test_prediction_counts_and_alignment) ... ok\r\ntest_serialization_and_root_harness_contract (test_learning.LearningTests.test_serialization_and_root_harness_contract) ... ok\r\ntest_training_preprocessing_and_estimator_state_are_fold_local (test_learning.LearningTests.test_training_preprocessing_and_estimator_state_are_fold_local) ... ok\r\ntest_trees_fit_log10_of_clipped_seconds (test_learning.LearningTests.test_trees_fit_log10_of_clipped_seconds) ... ok\r\ntest_conditional_blocks_count_static_branches (test_parser.ParserTests.test_conditional_blocks_count_static_branches) ... ok\r\ntest_fast_path_declares_approximation_and_keeps_early_registers (test_parser.ParserTests.test_fast_path_declares_approximation_and_keeps_early_registers) ... ok\r\ntest_large_sample_is_explicit_and_histograms_remain_exact (test_parser.ParserTests.test_large_sample_is_explicit_and_histograms_remain_exact) ... ok\r\ntest_malformed_or_recursive_programs_rejected (test_parser.ParserTests.test_malformed_or_recursive_programs_rejected) ... ok\r\ntest_qasm2_inline_comments_and_register_broadcast (test_parser.ParserTests.test_qasm2_inline_comments_and_register_broadcast) ... ok\r\ntest_qasm3_nested_custom_gates_only_called_definitions (test_parser.ParserTests.test_qasm3_nested_custom_gates_only_called_definitions) ... ok\r\ntest_scalar_qubits_and_parallel_depth (test_parser.ParserTests.test_scalar_qubits_and_parallel_depth) ... ok\r\n\r\n----------------------------------------------------------------------\r\nRan 14 tests in 1.792s\r\n\r\nOK\r\n"
+    },
+    {
+      "stage": "final expanded suite",
+      "command": "& 'C:/Users/apier/OneDrive/Documents/Code/QuantumRings/ML-Agent/.venv/Scripts/python.exe' -m unittest discover -s tests -v",
+      "exit_code": 0,
+      "tests_run": 14,
+      "unittest_elapsed_seconds": 2.738,
+      "command_wall_time_seconds": 7.0139877,
+      "output": "test_hist_gradient_boosting (test_learning.LearningTests.test_hist_gradient_boosting) ... ok\r\ntest_identity_and_invalid_targets_rejected (test_learning.LearningTests.test_identity_and_invalid_targets_rejected) ... ok\r\ntest_median_clips_before_aggregation_and_unseen_fallback (test_learning.LearningTests.test_median_clips_before_aggregation_and_unseen_fallback) ... ok\r\ntest_prediction_counts_and_alignment (test_learning.LearningTests.test_prediction_counts_and_alignment) ... ok\r\ntest_serialization_and_root_harness_contract (test_learning.LearningTests.test_serialization_and_root_harness_contract) ... ok\r\ntest_training_preprocessing_and_estimator_state_are_fold_local (test_learning.LearningTests.test_training_preprocessing_and_estimator_state_are_fold_local) ... ok\r\ntest_trees_fit_log10_of_clipped_seconds (test_learning.LearningTests.test_trees_fit_log10_of_clipped_seconds) ... ok\r\ntest_conditional_blocks_count_static_branches (test_parser.ParserTests.test_conditional_blocks_count_static_branches) ... ok\r\ntest_fast_path_declares_approximation_and_keeps_early_registers (test_parser.ParserTests.test_fast_path_declares_approximation_and_keeps_early_registers) ... ok\r\ntest_large_sample_is_explicit_and_histograms_remain_exact (test_parser.ParserTests.test_large_sample_is_explicit_and_histograms_remain_exact) ... ok\r\ntest_malformed_or_recursive_programs_rejected (test_parser.ParserTests.test_malformed_or_recursive_programs_rejected) ... ok\r\ntest_qasm2_inline_comments_and_register_broadcast (test_parser.ParserTests.test_qasm2_inline_comments_and_register_broadcast) ... ok\r\ntest_qasm3_nested_custom_gates_only_called_definitions (test_parser.ParserTests.test_qasm3_nested_custom_gates_only_called_definitions) ... ok\r\ntest_scalar_qubits_and_parallel_depth (test_parser.ParserTests.test_scalar_qubits_and_parallel_depth) ... ok\r\n\r\n----------------------------------------------------------------------\r\nRan 14 tests in 2.738s\r\n\r\nOK\r\n"
+    }
+  ],
+  "environment_check": {
+    "command": "& 'C:/Users/apier/OneDrive/Documents/Code/QuantumRings/ML-Agent/.venv/Scripts/python.exe' -c @'\nimport hashlib\nimport importlib.metadata as metadata\nimport json\nimport platform\nfrom pathlib import Path\nimport sys\nimport tomllib\n\nproject = tomllib.loads(Path(\"pyproject.toml\").read_text(encoding=\"utf-8\"))[\"project\"]\nlocked = []\nfor line in Path(\"requirements.lock.txt\").read_text(encoding=\"utf-8\").splitlines():\n    if not line or line.startswith(\"#\"):\n        continue\n    name, expected = line.split(\"==\", 1)\n    try:\n        installed = metadata.version(name)\n    except metadata.PackageNotFoundError:\n        installed = None\n    locked.append({\"name\": name, \"expected\": expected, \"installed\": installed, \"matches_lock\": installed == expected})\npaths = [\"model_config.json\", \"model.py\", \"runtime_pipeline/learning.py\", \"runtime_pipeline/model.py\", \"runtime_pipeline/parser.py\", \"run.py\", \"score.py\", \"requirements.lock.txt\", \"pyproject.toml\"]\nprint(json.dumps({\"python_executable\": sys.executable, \"python_version\": platform.python_version(), \"requires_python\": project[\"requires-python\"], \"declared_dependencies\": project[\"dependencies\"], \"locked_dependencies\": locked, \"sha256\": {p: hashlib.sha256(Path(p).read_bytes()).hexdigest() for p in paths}}, indent=2))\n'@",
+    "exit_code": 0,
+    "command_wall_time_seconds": 0.7434256,
+    "result": {
+      "python_executable": "C:\\Users\\apier\\OneDrive\\Documents\\Code\\QuantumRings\\ML-Agent\\.venv\\Scripts\\python.exe",
+      "python_version": "3.12.10",
+      "requires_python": ">=3.12",
+      "declared_dependencies": [
+        "numpy>=2",
+        "scikit-learn>=1.6",
+        "joblib>=1.4",
+        "zstandard>=0.22",
+        "threadpoolctl>=3.6"
+      ],
+      "locked_dependencies": [
+        {
+          "name": "attrs",
+          "expected": "26.1.0",
+          "installed": "26.1.0",
+          "matches_lock": true
+        },
+        {
+          "name": "cloudpickle",
+          "expected": "3.1.2",
+          "installed": "3.1.2",
+          "matches_lock": true
+        },
+        {
+          "name": "joblib",
+          "expected": "1.6.0",
+          "installed": "1.6.0",
+          "matches_lock": true
+        },
+        {
+          "name": "jsonschema",
+          "expected": "4.26.0",
+          "installed": "4.26.0",
+          "matches_lock": true
+        },
+        {
+          "name": "jsonschema-specifications",
+          "expected": "2025.9.1",
+          "installed": "2025.9.1",
+          "matches_lock": true
+        },
+        {
+          "name": "narwhals",
+          "expected": "2.28.0",
+          "installed": "2.28.0",
+          "matches_lock": true
+        },
+        {
+          "name": "numpy",
+          "expected": "2.5.4",
+          "installed": "2.5.4",
+          "matches_lock": true
+        },
+        {
+          "name": "referencing",
+          "expected": "0.37.0",
+          "installed": "0.37.0",
+          "matches_lock": true
+        },
+        {
+          "name": "rpds-py",
+          "expected": "2026.9.1",
+          "installed": "2026.9.1",
+          "matches_lock": true
+        },
+        {
+          "name": "scikit-learn",
+          "expected": "1.9.1",
+          "installed": "1.9.1",
+          "matches_lock": true
+        },
+        {
+          "name": "scipy",
+          "expected": "1.18.1",
+          "installed": "1.18.1",
+          "matches_lock": true
+        },
+        {
+          "name": "threadpoolctl",
+          "expected": "3.8.0",
+          "installed": "3.8.0",
+          "matches_lock": true
+        },
+        {
+          "name": "typing_extensions",
+          "expected": "4.16.0",
+          "installed": "4.16.0",
+          "matches_lock": true
+        },
+        {
+          "name": "tzdata",
+          "expected": "2026.6",
+          "installed": "2026.6",
+          "matches_lock": true
+        },
+        {
+          "name": "zstandard",
+          "expected": "0.25.0",
+          "installed": "0.25.0",
+          "matches_lock": true
+        }
+      ],
+      "sha256": {
+        "model_config.json": "a7eacdd763c63ade97aa7bdd38dda4c37ebadd21908857d4791c0eb5f5aa45f6",
+        "model.py": "1233fc1e19717ececa9c280149376ab8bf75182eac67ef8c2d4f5b7cfd0266ec",
+        "runtime_pipeline/learning.py": "b6efe4aab1e2dc45972a2abb7b3338fe92e691c63d38b4b85ce8539ddcad97ac",
+        "runtime_pipeline/model.py": "06d1e761fc5406b0b5c0458489319d872b451a40843050be0e0dd44a4654e527",
+        "runtime_pipeline/parser.py": "ca1a67c37de420321b5558dc57b247aeb4cbae1577b758797ed2b466b9962815",
+        "run.py": "64ff818d94304ca7bb508ff9af07a9791a8e93f01345a0e79f16ff792ced8b6b",
+        "score.py": "9d81105f3bd3d5b65a018241cd876bdaa36ac9387221aa78ca9e5e23eb901528",
+        "requirements.lock.txt": "6c097a14c758fdb9ad69a3ec47b6aaaa92464b7d157f962d7940749e02127662",
+        "pyproject.toml": "688ef9300c153b3e32db75f168bf922999a5ec09bdabeec650ba32509a900666"
+      }
+    },
+    "dependency_mismatches": []
+  },
+  "integrity_check": {
+    "command": "& 'C:/Users/apier/OneDrive/Documents/Code/QuantumRings/ML-Agent/.venv/Scripts/python.exe' -c @'\nimport hashlib\nimport inspect\nimport json\nfrom pathlib import Path\nfrom model import RuntimeModel\nfrom runtime_pipeline.learning import FittedRuntimeEstimator, fit_model\nfrom runtime_pipeline.model import RuntimeModel as PackageRuntimeModel\nfrom runtime_pipeline.parser import featurize\n\nexpected_hashes = json.loads(r'''{\"model_config.json\":\"a7eacdd763c63ade97aa7bdd38dda4c37ebadd21908857d4791c0eb5f5aa45f6\",\"model.py\":\"1233fc1e19717ececa9c280149376ab8bf75182eac67ef8c2d4f5b7cfd0266ec\",\"runtime_pipeline/learning.py\":\"b6efe4aab1e2dc45972a2abb7b3338fe92e691c63d38b4b85ce8539ddcad97ac\",\"runtime_pipeline/model.py\":\"06d1e761fc5406b0b5c0458489319d872b451a40843050be0e0dd44a4654e527\",\"runtime_pipeline/parser.py\":\"ca1a67c37de420321b5558dc57b247aeb4cbae1577b758797ed2b466b9962815\",\"run.py\":\"64ff818d94304ca7bb508ff9af07a9791a8e93f01345a0e79f16ff792ced8b6b\",\"score.py\":\"9d81105f3bd3d5b65a018241cd876bdaa36ac9387221aa78ca9e5e23eb901528\",\"requirements.lock.txt\":\"6c097a14c758fdb9ad69a3ec47b6aaaa92464b7d157f962d7940749e02127662\",\"pyproject.toml\":\"688ef9300c153b3e32db75f168bf922999a5ec09bdabeec650ba32509a900666\"}''')\ncurrent_hashes = {path: hashlib.sha256(Path(path).read_bytes()).hexdigest() for path in expected_hashes}\nexpected_config = {\"kind\": \"extra_trees\", \"n_estimators\": 400, \"min_samples_leaf\": 2, \"max_features\": 1.0, \"n_jobs\": 4}\nconfig = json.loads(Path(\"model_config.json\").read_text(encoding=\"utf-8\"))\ninterfaces = {\n    \"fit_model\": (fit_model, [\"feature_rows\", \"thresholds\", \"targets_s\", \"seed\", \"config\"]),\n    \"estimator.predict\": (FittedRuntimeEstimator.predict, [\"self\", \"feature_rows\", \"thresholds\"]),\n    \"parser.featurize\": (featurize, [\"qasm_text\"]),\n    \"RuntimeModel\": (RuntimeModel, [\"artifacts_dir\"]),\n    \"RuntimeModel.featurize\": (RuntimeModel.featurize, [\"self\", \"qasm_text\"]),\n    \"RuntimeModel.predict\": (RuntimeModel.predict, [\"self\", \"features\", \"threshold\"]),\n}\nresult = {\n    \"sha256_before\": expected_hashes,\n    \"sha256_after\": current_hashes,\n    \"all_checked_files_unchanged\": current_hashes == expected_hashes,\n    \"config\": config,\n    \"config_matches_approved_baseline\": config == expected_config,\n    \"signatures\": {name: str(inspect.signature(func)) for name, (func, _) in interfaces.items()},\n    \"parameter_names_match\": all(list(inspect.signature(func).parameters) == names for func, names in interfaces.values()),\n    \"root_reexports_package_adapter\": RuntimeModel is PackageRuntimeModel,\n    \"adapter_default_artifacts_dir_is_none\": inspect.signature(RuntimeModel).parameters[\"artifacts_dir\"].default is None,\n    \"test_file_sha256\": hashlib.sha256(Path(\"tests/test_learning.py\").read_bytes()).hexdigest(),\n}\nprint(json.dumps(result, indent=2))\nassert result[\"all_checked_files_unchanged\"]\nassert result[\"config_matches_approved_baseline\"]\nassert result[\"parameter_names_match\"]\nassert result[\"root_reexports_package_adapter\"]\nassert result[\"adapter_default_artifacts_dir_is_none\"]\n'@",
+    "exit_code": 0,
+    "command_wall_time_seconds": 4.1198314,
+    "result": {
+      "sha256_before": {
+        "model_config.json": "a7eacdd763c63ade97aa7bdd38dda4c37ebadd21908857d4791c0eb5f5aa45f6",
+        "model.py": "1233fc1e19717ececa9c280149376ab8bf75182eac67ef8c2d4f5b7cfd0266ec",
+        "runtime_pipeline/learning.py": "b6efe4aab1e2dc45972a2abb7b3338fe92e691c63d38b4b85ce8539ddcad97ac",
+        "runtime_pipeline/model.py": "06d1e761fc5406b0b5c0458489319d872b451a40843050be0e0dd44a4654e527",
+        "runtime_pipeline/parser.py": "ca1a67c37de420321b5558dc57b247aeb4cbae1577b758797ed2b466b9962815",
+        "run.py": "64ff818d94304ca7bb508ff9af07a9791a8e93f01345a0e79f16ff792ced8b6b",
+        "score.py": "9d81105f3bd3d5b65a018241cd876bdaa36ac9387221aa78ca9e5e23eb901528",
+        "requirements.lock.txt": "6c097a14c758fdb9ad69a3ec47b6aaaa92464b7d157f962d7940749e02127662",
+        "pyproject.toml": "688ef9300c153b3e32db75f168bf922999a5ec09bdabeec650ba32509a900666"
+      },
+      "sha256_after": {
+        "model_config.json": "a7eacdd763c63ade97aa7bdd38dda4c37ebadd21908857d4791c0eb5f5aa45f6",
+        "model.py": "1233fc1e19717ececa9c280149376ab8bf75182eac67ef8c2d4f5b7cfd0266ec",
+        "runtime_pipeline/learning.py": "b6efe4aab1e2dc45972a2abb7b3338fe92e691c63d38b4b85ce8539ddcad97ac",
+        "runtime_pipeline/model.py": "06d1e761fc5406b0b5c0458489319d872b451a40843050be0e0dd44a4654e527",
+        "runtime_pipeline/parser.py": "ca1a67c37de420321b5558dc57b247aeb4cbae1577b758797ed2b466b9962815",
+        "run.py": "64ff818d94304ca7bb508ff9af07a9791a8e93f01345a0e79f16ff792ced8b6b",
+        "score.py": "9d81105f3bd3d5b65a018241cd876bdaa36ac9387221aa78ca9e5e23eb901528",
+        "requirements.lock.txt": "6c097a14c758fdb9ad69a3ec47b6aaaa92464b7d157f962d7940749e02127662",
+        "pyproject.toml": "688ef9300c153b3e32db75f168bf922999a5ec09bdabeec650ba32509a900666"
+      },
+      "all_checked_files_unchanged": true,
+      "config": {
+        "kind": "extra_trees",
+        "n_estimators": 400,
+        "min_samples_leaf": 2,
+        "max_features": 1,
+        "n_jobs": 4
+      },
+      "config_matches_approved_baseline": true,
+      "signatures": {
+        "fit_model": "(feature_rows: list[dict], thresholds: list[int], targets_s: list[float], seed: int, config: dict) -> runtime_pipeline.learning.FittedRuntimeEstimator",
+        "estimator.predict": "(self, feature_rows, thresholds)",
+        "parser.featurize": "(qasm_text: str) -> dict[str, float]",
+        "RuntimeModel": "(artifacts_dir=None)",
+        "RuntimeModel.featurize": "(self, qasm_text: str) -> dict",
+        "RuntimeModel.predict": "(self, features: dict, threshold: int) -> float"
+      },
+      "parameter_names_match": true,
+      "root_reexports_package_adapter": true,
+      "adapter_default_artifacts_dir_is_none": true,
+      "test_file_sha256": "5348fd7fd05d042cbed8d90f0329aea9d8ae794b0bac2903b10702b802e1b439"
+    }
+  },
+  "whitespace_check": {
+    "command": "git diff --check",
+    "exit_code": 0,
+    "output": "warning: in the working copy of 'tests/test_learning.py', LF will be replaced by CRLF the next time Git touches it\n"
+  },
+  "observed_warnings": [
+    "Initial git status/diff commands exited 0 but warned that the sandbox denied access to the user-level Git ignore file.",
+    "Git diff/check exited 0 and warned that LF in tests/test_learning.py will be replaced by CRLF when Git next touches it."
+  ],
+  "command_failures": [],
+  "limitations": [
+    "Only synthetic training and held-out features were used; held-out labels were not created or supplied to fitting.",
+    "The existing hist_gradient_boosting smoke test was retained; reduced-tree unit fixtures are contract checks, not an estimator/parameter search.",
+    "Test durations are local unittest durations, not validation scores or representative large-circuit parser/inference timing certification.",
+    "No controller evaluation or model comparison ran; no measured validation improvement or promotion is claimed.",
+    "No audit data, frozen folds, research records or controller code were opened or changed."
+  ]
+}

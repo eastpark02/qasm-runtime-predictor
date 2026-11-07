@@ -1,0 +1,85 @@
+{
+  "created_at": "2026-11-07T08:06:50.559395+00:00",
+  "stage": "step-00-attempt-0-code",
+  "summary": "Exactly four sampled cut features; two endpoint updates per eligible processed instance and one scan over all declared cuts. Integer moments produce population variance without floating-point subtraction.",
+  "test_command": "& 'C:/Users/apier/OneDrive/Documents/Code/QuantumRings/ML-Agent/.venv/Scripts/python.exe' -m unittest discover -s tests -p test_parser.py -v",
+  "test_exit_code": 0,
+  "tests_passed": 24,
+  "test_seconds": 21.56,
+  "test_log": "validation/cut-statistics-parser-tests.log",
+  "legacy_feature_preservation": {
+    "synthetic_fixtures": 20,
+    "old_features_per_fixture": 90,
+    "new_features_per_fixture": 94,
+    "comparison": "Exact dictionary equality after removing the four new keys; passed in focused tests"
+  },
+  "prechange_snapshot_max_parser_s": 2.8934256000065943,
+  "timing_command": [
+    "C:\\Users\\apier\\OneDrive\\Documents\\Code\\QuantumRings\\ML-Agent\\.venv\\Scripts\\python.exe",
+    "validation/measure_cut_parser.py",
+    "--development-inputs",
+    "C:/Users/apier/OneDrive/Documents/Code/QuantumRings/ML-Agent/runs/iqc-2026-runtime/development/inputs.json"
+  ],
+  "timing_exit_code": 0,
+  "timing": {
+    "expected_calls": 84,
+    "completed_calls": 84,
+    "max_parser_s": 5.332088399998611,
+    "failures": [],
+    "synthetic_calls": 60,
+    "development_benchmark_calls": 24,
+    "report": "validation/cut-statistics-timing.json"
+  },
+  "protected_files": {
+    "runtime_pipeline/learning.py": {
+      "before_sha256": "b6efe4aab1e2dc45972a2abb7b3338fe92e691c63d38b4b85ce8539ddcad97ac",
+      "after_sha256": "b6efe4aab1e2dc45972a2abb7b3338fe92e691c63d38b4b85ce8539ddcad97ac",
+      "unchanged": true
+    },
+    "model_config.json": {
+      "before_sha256": "a7eacdd763c63ade97aa7bdd38dda4c37ebadd21908857d4791c0eb5f5aa45f6",
+      "after_sha256": "a7eacdd763c63ade97aa7bdd38dda4c37ebadd21908857d4791c0eb5f5aa45f6",
+      "unchanged": true
+    },
+    "model.py": {
+      "before_sha256": "1233fc1e19717ececa9c280149376ab8bf75182eac67ef8c2d4f5b7cfd0266ec",
+      "after_sha256": "1233fc1e19717ececa9c280149376ab8bf75182eac67ef8c2d4f5b7cfd0266ec",
+      "unchanged": true
+    },
+    "runtime_pipeline/model.py": {
+      "before_sha256": "06d1e761fc5406b0b5c0458489319d872b451a40843050be0e0dd44a4654e527",
+      "after_sha256": "06d1e761fc5406b0b5c0458489319d872b451a40843050be0e0dd44a4654e527",
+      "unchanged": true
+    },
+    "run.py": {
+      "before_sha256": "64ff818d94304ca7bb508ff9af07a9791a8e93f01345a0e79f16ff792ced8b6b",
+      "after_sha256": "64ff818d94304ca7bb508ff9af07a9791a8e93f01345a0e79f16ff792ced8b6b",
+      "unchanged": true
+    },
+    "score.py": {
+      "before_sha256": "9d81105f3bd3d5b65a018241cd876bdaa36ac9387221aa78ca9e5e23eb901528",
+      "after_sha256": "9d81105f3bd3d5b65a018241cd876bdaa36ac9387221aa78ca9e5e23eb901528",
+      "unchanged": true
+    }
+  },
+  "git_diff_check": {
+    "command": [
+      "git",
+      "diff",
+      "--check"
+    ],
+    "exit_code": 0,
+    "stdout": "",
+    "stderr": "warning: in the working copy of 'README.md', LF will be replaced by CRLF the next time Git touches it\nwarning: in the working copy of 'runtime_pipeline/parser.py', LF will be replaced by CRLF the next time Git touches it\nwarning: in the working copy of 'tests/test_parser.py', LF will be replaced by CRLF the next time Git touches it\n"
+  },
+  "git_status": {
+    "exit_code": 0,
+    "stdout": " M README.md\n M runtime_pipeline/parser.py\n M tests/test_parser.py\n?? validation/cut-statistics-before.json\n?? validation/cut-statistics-parser-tests.log\n?? validation/cut-statistics-timing.json\n?? validation/cut-statistics-timing.log\n?? validation/cut_fixtures.py\n?? validation/measure_cut_parser.py\n",
+    "stderr": "warning: unable to access 'C:\\Users\\apier/.config/git/ignore': Permission denied\nwarning: unable to access 'C:\\Users\\apier/.config/git/ignore': Permission denied\n"
+  },
+  "limitations": [
+    "No validation score or prediction-latency claim; full project tests and final end-to-end timing remain controller-owned.",
+    "Timing is local evidence for the designated fixtures, not a guarantee for arbitrary QASM.",
+    "No labels, audit data, model fits, simulations, or external services were used."
+  ]
+}

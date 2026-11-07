@@ -1,0 +1,12 @@
+{
+  "argv": [
+    "C:\\Users\\apier\\OneDrive\\Documents\\Code\\QuantumRings\\ML-Agent\\.venv\\Scripts\\python.exe",
+    "validation/measure_baseline.py",
+    "--development-inputs",
+    "C:\\Users\\apier\\OneDrive\\Documents\\Code\\QuantumRings\\ML-Agent\\runs\\iqc-2026-runtime\\development\\inputs.json"
+  ],
+  "exit_code": 0,
+  "elapsed_s": 179.09046060000037,
+  "finished_at": "2026-11-07T06:18:10.529335+00:00",
+  "combined_output": "validation/baseline-03-timing/command.log"
+}

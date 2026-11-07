@@ -1,0 +1,12 @@
+{
+  "finished_at": "2026-11-07T07:25:39.1312662Z",
+  "started_at": "2026-11-07T07:21:45.7890923Z",
+  "exit_code": 0,
+  "command_argv": [
+    "C:/Users/apier/OneDrive/Documents/Code/QuantumRings/ML-Agent/.venv/Scripts/python.exe",
+    "-u",
+    "validation/measure_candidate.py",
+    "--development-inputs",
+    "C:/Users/apier/OneDrive/Documents/Code/QuantumRings/ML-Agent/runs/iqc-2026-runtime/development/inputs.json"
+  ]
+}

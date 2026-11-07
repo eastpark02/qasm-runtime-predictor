@@ -1,0 +1,211 @@
+{
+  "run_id": "iqc-2026-runtime",
+  "cycle_id": "cycle-0001",
+  "step_id": "step-01-attempt-0-code",
+  "manager_step_id": "baseline-02-repair-bounded-parser-work",
+  "python_executable": "C:\\Users\\apier\\OneDrive\\Documents\\Code\\QuantumRings\\ML-Agent\\.venv\\Scripts\\python.exe",
+  "python_version": "3.12.10 (tags/v3.12.10:0cc8128, Apr  8 2025, 12:21:36) [MSC v.1943 64 bit (AMD64)]",
+  "affected_paths": [
+    "runtime_pipeline/parser.py",
+    "tests/test_parser.py",
+    "README.md",
+    "validation/baseline-02-bounded-parser.json"
+  ],
+  "changes": [
+    "Cache the graph degree mean once; preserve the population variance formula.",
+    "Bound broadcast instances by the remaining operation budget and stop subsequent detail statements/windows.",
+    "Weight character coverage of a partial statement by processed broadcast width so incomplete detail cannot enable histogram correction.",
+    "Preserve public interfaces, feature keys, gate families, and all production sampling budgets."
+  ],
+  "commands_run": [
+    {
+      "command": "& 'C:/Users/apier/OneDrive/Documents/Code/QuantumRings/ML-Agent/.venv/Scripts/python.exe' -m unittest discover -s tests -p test_parser.py -v",
+      "phase": "before new regression tests and parser edits",
+      "exit_code": 0,
+      "tests_run": 7,
+      "unittest_elapsed_seconds": 0.988
+    },
+    {
+      "command": "& 'C:/Users/apier/OneDrive/Documents/Code/QuantumRings/ML-Agent/.venv/Scripts/python.exe' -m unittest discover -s tests -p test_parser.py -v",
+      "phase": "new regression tests against original parser",
+      "exit_code": 1,
+      "tests_run": 14,
+      "failed_subcases": 13,
+      "unittest_elapsed_seconds": 0.874,
+      "outcome": "Expected reproduction failures: broadcast overshoot, unintended full histogram correction, and degree traversals (19 at n=16; 67 at n=64)."
+    },
+    {
+      "command": "& 'C:/Users/apier/OneDrive/Documents/Code/QuantumRings/ML-Agent/.venv/Scripts/python.exe' -m unittest discover -s tests -v",
+      "phase": "after parser repair",
+      "exit_code": 0,
+      "tests_run": 21,
+      "unittest_elapsed_seconds": 2.181,
+      "outcome": "All 14 parser tests and all 7 existing learning/interface tests passed."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "outcome": "No whitespace errors; Git emitted LF-to-CRLF normalization warnings."
+    },
+    {
+      "command": "git -c core.excludesFile=NUL status --short",
+      "outcome": "Failed: fatal: cannot use NUL as an exclude file. Its individual exit code was not captured because subsequent diff commands in the same PowerShell call succeeded. This status invocation is not a passing check; retried with ordinary git status."
+    },
+    {
+      "command": "git status --short",
+      "exit_code": 0,
+      "outcome": "Confirmed exactly the four affected paths listed above. Git warned that its user-level ignore file was inaccessible; no Git configuration was modified."
+    },
+    {
+      "command": "PowerShell here-string containing synthetic_smoke.python_source | & 'C:/Users/apier/OneDrive/Documents/Code/QuantumRings/ML-Agent/.venv/Scripts/python.exe' -",
+      "outcome": "All synthetic assertions passed; measured durations are in synthetic_smoke.records."
+    },
+    {
+      "command": "PowerShell Python here-string | & 'C:/Users/apier/OneDrive/Documents/Code/QuantumRings/ML-Agent/.venv/Scripts/python.exe' -",
+      "outcome": "Printed before-repair and captured after-repair features for the two small max_ops=3 examples; inputs and outputs recorded below."
+    }
+  ],
+  "regression_coverage": [
+    "Independent statistics.mean/statistics.pvariance references for edgeless, path, star, and triangle graphs, including isolated qubits.",
+    "Degree-array traversal counts bounded independently of qubit count, without timing assertions.",
+    "Explicit budgets 0, 1, 2, 5, 12, 13, and 14 for 12-wide broadcasts, with and without a preceding indexed operation.",
+    "Incomplete final broadcasts, exact-budget completion, and stopping before subsequent invalid statements/windows.",
+    "Complete indexed, register-broadcast, nested-custom-call and custom-broadcast histograms and graphs; unused definitions excluded in exact mode.",
+    "Partial builtin/custom broadcasts retain uncorrected histograms and unchanged feature keys.",
+    "Actual 8,000,000/8,000,001 character histogram branch boundary and documented large-source approximation."
+  ],
+  "small_budget_comparison": {
+    "max_ops": 3,
+    "programs": {
+      "builtin_broadcast": "OPENQASM 2.0; qreg a[8]; qreg b[8]; cx a,b;",
+      "custom_broadcast": "OPENQASM 2.0; gate pair a,b { h a; cx a,b; } qreg a[8]; qreg b[8]; pair a,b;"
+    },
+    "before_repair_observed": {
+      "builtin_broadcast": {
+        "n_ops": 8.0,
+        "dependency_sample_fraction": 1.0,
+        "dependency_sample_operations": 8.0,
+        "depth_proxy": 1.0,
+        "sample_interaction_edges": 8.0,
+        "sample_components": 8.0,
+        "sample_degree_mean": 1.0,
+        "sample_degree_variance": 0.0,
+        "sample_active_qubits": 16.0,
+        "gate_cx": 8.0,
+        "gate_h": 0.0
+      },
+      "custom_broadcast": {
+        "n_ops": 16.0,
+        "dependency_sample_fraction": 1.0,
+        "dependency_sample_operations": 8.0,
+        "depth_proxy": 1.0,
+        "sample_interaction_edges": 8.0,
+        "sample_components": 8.0,
+        "sample_degree_mean": 1.0,
+        "sample_degree_variance": 0.0,
+        "sample_active_qubits": 16.0,
+        "gate_cx": 8.0,
+        "gate_h": 8.0
+      }
+    },
+    "after_repair_observed": {
+      "builtin_broadcast": {
+        "n_ops": 1.0,
+        "dependency_sample_fraction": 0.8837209302325582,
+        "dependency_sample_operations": 3.0,
+        "depth_proxy": 1.131578947368421,
+        "sample_interaction_edges": 3.0,
+        "sample_components": 13.0,
+        "sample_degree_mean": 0.375,
+        "sample_degree_variance": 0.234375,
+        "sample_active_qubits": 6.0,
+        "gate_cx": 1.0,
+        "gate_h": 0.0
+      },
+      "custom_broadcast": {
+        "n_ops": 2.0,
+        "dependency_sample_fraction": 0.8670212765957447,
+        "dependency_sample_operations": 3.0,
+        "depth_proxy": 1.1533742331288344,
+        "sample_interaction_edges": 3.0,
+        "sample_components": 13.0,
+        "sample_degree_mean": 0.375,
+        "sample_degree_variance": 0.234375,
+        "sample_active_qubits": 6.0,
+        "gate_cx": 1.0,
+        "gate_h": 1.0
+      }
+    }
+  },
+  "synthetic_smoke": {
+    "python_source": "import math\nimport time\nfrom runtime_pipeline import parser\nrecords = []\nfor width in (25000, 25001, 100000):\n    text = f\"OPENQASM 2.0; qreg a[{width}]; qreg b[{width}]; cx a,b;\"\n    started = time.perf_counter()\n    features = parser.featurize(text)\n    elapsed = time.perf_counter() - started\n    assert features[\"dependency_sample_operations\"] == min(width, 25000)\n    assert features[\"sample_interaction_edges\"] == min(width, 25000)\n    assert features[\"sample_active_qubits\"] == 2 * min(width, 25000)\n    assert features[\"n_ops\"] == (width if width <= 25000 else 1)\n    assert (features[\"dependency_sample_fraction\"] == 1) == (width <= 25000)\n    assert all(math.isfinite(value) for value in features.values())\n    assert elapsed < 15\n    records.append({\"broadcast_width\": width, \"text_characters\": len(text),\n                    \"elapsed_seconds\": elapsed, \"feature_count\": len(features),\n                    \"features\": {key: features[key] for key in (\n                        \"n_ops\", \"dependency_sample_operations\", \"dependency_sample_fraction\",\n                        \"depth_proxy\", \"sample_interaction_edges\", \"sample_components\",\n                        \"sample_active_qubits\", \"sample_degree_mean\", \"sample_degree_variance\")}})\ntext = \"OPENQASM 2.0; qreg q[100000]; h q[0];\"\nstarted = time.perf_counter()\nfeatures = parser.featurize(text)\nelapsed = time.perf_counter() - started\nassert features[\"sample_degree_mean\"] == features[\"sample_degree_variance\"] == 0\nassert features[\"sample_components\"] == 100000\nassert all(math.isfinite(value) for value in features.values())\nassert elapsed < 15\nrecords.append({\"isolated_qubits\": 100000, \"elapsed_seconds\": elapsed,\n                \"feature_count\": len(features), \"sample_degree_mean\": 0.0,\n                \"sample_degree_variance\": 0.0})\n",
+    "records": [
+      {
+        "broadcast_width": 25000,
+        "text_characters": 51,
+        "elapsed_seconds": 0.1007333000015933,
+        "feature_count": 90,
+        "features": {
+          "n_ops": 25000.0,
+          "dependency_sample_operations": 25000.0,
+          "dependency_sample_fraction": 1.0,
+          "depth_proxy": 1.0,
+          "sample_interaction_edges": 25000.0,
+          "sample_components": 25000.0,
+          "sample_active_qubits": 50000.0,
+          "sample_degree_mean": 1.0,
+          "sample_degree_variance": 0.0
+        }
+      },
+      {
+        "broadcast_width": 25001,
+        "text_characters": 51,
+        "elapsed_seconds": 0.10354730000108248,
+        "feature_count": 90,
+        "features": {
+          "n_ops": 1.0,
+          "dependency_sample_operations": 25000.0,
+          "dependency_sample_fraction": 0.9999937257411664,
+          "depth_proxy": 1.0000062742982,
+          "sample_interaction_edges": 25000.0,
+          "sample_components": 25002.0,
+          "sample_active_qubits": 50000.0,
+          "sample_degree_mean": 0.999960001599936,
+          "sample_degree_variance": 3.9996800191989765e-05
+        }
+      },
+      {
+        "broadcast_width": 100000,
+        "text_characters": 53,
+        "elapsed_seconds": 0.17527030000201194,
+        "feature_count": 90,
+        "features": {
+          "n_ops": 1.0,
+          "dependency_sample_operations": 25000.0,
+          "dependency_sample_fraction": 0.8867924528301887,
+          "depth_proxy": 1.127659574468085,
+          "sample_interaction_edges": 25000.0,
+          "sample_components": 175000.0,
+          "sample_active_qubits": 50000.0,
+          "sample_degree_mean": 0.25,
+          "sample_degree_variance": 0.1875
+        }
+      },
+      {
+        "isolated_qubits": 100000,
+        "elapsed_seconds": 0.02981559999898309,
+        "feature_count": 90,
+        "sample_degree_mean": 0.0,
+        "sample_degree_variance": 0.0
+      }
+    ],
+    "timing_scope": "Single local featurize calls on synthetic circuit strings, excluding imports and input construction; not corpus-wide timing."
+  },
+  "limitations": [
+    "No development or audit data was opened; no measured validation score or improvement is claimed.",
+    "Synthetic timing does not establish the 15-second limit for every designated development circuit; controller review and timing remain authoritative.",
+    "Enforcing the existing limit intentionally changes overshooting inputs: sampled graph/usage/depth use only the processed prefix; full-detail broadcast histogram correction is withheld.",
+    "dependency_sample_fraction estimates character coverage, not the fraction of broadcast operations. expanded_counts_complete continues to describe custom-definition composition, not broadcast completeness.",
+    "Large-source histogram approximation (including unused definition bodies) and custom-call dependency proxies are unchanged."
+  ]
+}

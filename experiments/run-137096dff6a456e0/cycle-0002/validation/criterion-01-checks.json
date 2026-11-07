@@ -1,0 +1,79 @@
+{
+  "run_id": "iqc-2026-runtime",
+  "cycle_id": "cycle-0002",
+  "step_id": "step-00-attempt-0-code",
+  "manager_step_id": "criterion-01-implementation",
+  "role": "coder",
+  "status": "passed",
+  "workspace": "C:\\Users\\apier\\OneDrive\\Documents\\Code\\QuantumRings\\ml-agent-pipeline\\experiments\\run-137096dff6a456e0\\cycle-0002",
+  "production_changes": {
+    "runtime_pipeline/learning.py": "Pass criterion=config.get('criterion', 'squared_error') to ExtraTreesRegressor.",
+    "model_config.json": "Add only criterion='absolute_error'; all other entries unchanged."
+  },
+  "config": {
+    "kind": "extra_trees",
+    "criterion": "absolute_error",
+    "n_estimators": 400,
+    "min_samples_leaf": 2,
+    "max_features": 1,
+    "n_jobs": 4
+  },
+  "checks": {
+    "existing_unittest_suite": {
+      "tests": 21,
+      "failures": 0,
+      "errors": 0,
+      "reported_seconds": 2.992
+    },
+    "criterion_smoke": "Both seeds 42/43 passed with all 400 trees. A constant-feature skewed-target fixture produced 100 seconds with absolute_error and approximately 2.156659091 seconds with the omitted-criterion squared_error default, matching the analytically expected log-target aggregations.",
+    "contracts": "RuntimeModel exports identical; serialization and keyword interfaces passed; preprocessing vocabulary and median imputation use supplied rows only and remain unchanged during prediction; bounded finite outputs and empty prediction handling passed.",
+    "unrelated_branches": "Median and hist_gradient_boosting outputs were identical with versus without a criterion configuration entry.",
+    "production_scope": "Git diff contains exactly one added line in each of learning.py and model_config.json. Protected-path diff and whitespace checks exited 0.",
+    "git_warnings": "Git emitted LF-to-CRLF notices and could not read the global ignore file. Commands exited 0; their output is preserved below."
+  },
+  "data_access": "Synthetic fixtures only. No dataset label files, public packet, private manifest, or audit files were opened.",
+  "artifacts": "This evidence file only; synthetic serialization files used temporary candidate-local validation directories and were removed by TemporaryDirectory. artifacts/model.joblib was not written.",
+  "limitations": [
+    "This is evidence for the implementation step, not approval of the cycle or a promotion decision.",
+    "No measured candidate fitting/parser/inference latency benchmark or development validation scoring was performed.",
+    "Inherited baseline timing reports describe cycle-0001, not this criterion candidate. validation/measure_baseline.py retains its original fixed baseline configuration guard."
+  ],
+  "commands": [
+    {
+      "id": "existing-tests",
+      "cmd": "& 'C:/Users/apier/OneDrive/Documents/Code/QuantumRings/ML-Agent/.venv/Scripts/python.exe' -B -m unittest discover -s tests -v\nexit $LASTEXITCODE",
+      "exit_code": 0,
+      "output": "test_hist_gradient_boosting (test_learning.LearningTests.test_hist_gradient_boosting) ... ok\r\ntest_identity_and_invalid_targets_rejected (test_learning.LearningTests.test_identity_and_invalid_targets_rejected) ... ok\r\ntest_median_clips_before_aggregation_and_unseen_fallback (test_learning.LearningTests.test_median_clips_before_aggregation_and_unseen_fallback) ... ok\r\ntest_prediction_counts_and_alignment (test_learning.LearningTests.test_prediction_counts_and_alignment) ... ok\r\ntest_serialization_and_root_harness_contract (test_learning.LearningTests.test_serialization_and_root_harness_contract) ... ok\r\ntest_training_preprocessing_and_estimator_state_are_fold_local (test_learning.LearningTests.test_training_preprocessing_and_estimator_state_are_fold_local) ... ok\r\ntest_trees_fit_log10_of_clipped_seconds (test_learning.LearningTests.test_trees_fit_log10_of_clipped_seconds) ... ok\r\ntest_broadcast_operation_budget_and_partial_final_statement (test_parser.ParserTests.test_broadcast_operation_budget_and_partial_final_statement) ... ok\r\ntest_called_custom_broadcast_preserves_histogram_and_graph (test_parser.ParserTests.test_called_custom_broadcast_preserves_histogram_and_graph) ... ok\r\ntest_conditional_blocks_count_static_branches (test_parser.ParserTests.test_conditional_blocks_count_static_branches) ... ok\r\ntest_degree_moments_include_isolated_qubits (test_parser.ParserTests.test_degree_moments_include_isolated_qubits) ... ok\r\ntest_degree_statistics_use_bounded_number_of_array_traversals (test_parser.ParserTests.test_degree_statistics_use_bounded_number_of_array_traversals) ... ok\r\ntest_exhausted_budget_stops_later_statements_and_windows (test_parser.ParserTests.test_exhausted_budget_stops_later_statements_and_windows) ... ok\r\ntest_fast_path_declares_approximation_and_keeps_early_registers (test_parser.ParserTests.test_fast_path_declares_approximation_and_keeps_early_registers) ... ok\r\ntest_histogram_branch_at_exact_size_boundary (test_parser.ParserTests.test_histogram_branch_at_exact_size_boundary) ... ok\r\ntest_large_sample_is_explicit_and_histograms_remain_exact (test_parser.ParserTests.test_large_sample_is_explicit_and_histograms_remain_exact) ... ok\r\ntest_malformed_or_recursive_programs_rejected (test_parser.ParserTests.test_malformed_or_recursive_programs_rejected) ... ok\r\ntest_partial_broadcast_does_not_apply_complete_histogram_correction (test_parser.ParserTests.test_partial_broadcast_does_not_apply_complete_histogram_correction) ... ok\r\ntest_qasm2_inline_comments_and_register_broadcast (test_parser.ParserTests.test_qasm2_inline_comments_and_register_broadcast) ... ok\r\ntest_qasm3_nested_custom_gates_only_called_definitions (test_parser.ParserTests.test_qasm3_nested_custom_gates_only_called_definitions) ... ok\r\ntest_scalar_qubits_and_parallel_depth (test_parser.ParserTests.test_scalar_qubits_and_parallel_depth) ... ok\r\n\r\n----------------------------------------------------------------------\r\nRan 21 tests in 2.992s\r\n\r\nOK\r\n"
+    },
+    {
+      "id": "criterion-smoke",
+      "cmd": "@'\nimport inspect\nimport json\nimport tempfile\nfrom pathlib import Path\n\nimport joblib\nimport numpy as np\n\nfrom model import RuntimeModel\nfrom runtime_pipeline.model import RuntimeModel as PipelineRuntimeModel\nfrom runtime_pipeline.learning import fit_model\n\nconfig = json.loads(Path(\"model_config.json\").read_text(encoding=\"utf-8-sig\"))\nassert config == {\n    \"kind\": \"extra_trees\", \"criterion\": \"absolute_error\",\n    \"n_estimators\": 400, \"min_samples_leaf\": 2, \"max_features\": 1.0, \"n_jobs\": 4,\n}\nassert RuntimeModel is PipelineRuntimeModel\nassert list(inspect.signature(fit_model).parameters) == [\n    \"feature_rows\", \"thresholds\", \"targets_s\", \"seed\", \"config\"\n]\nrows = [{\"n_ops\": 10.0, \"empty_feature\": float(\"nan\")}] * 5\nthresholds = [16] * 5\ntargets = [1e-12, 1.0, 100.0, 1e6, 1e7]\nheld_out = [{}, {\"n_ops\": 1e20, \"held_out_only\": 1e20}]\ntest_thresholds = [16, 1024]\nclipped_logs = np.log10(np.clip(targets, 1e-9, 21600.0))\nresults = []\nfor seed in (42, 43):\n    for use_candidate in (True, False):\n        selected = dict(config)\n        if not use_candidate:\n            selected.pop(\"criterion\")\n        estimator = fit_model(rows, thresholds, targets, seed, selected)\n        regressor = estimator.model.named_steps[\"regressor\"]\n        criterion = \"absolute_error\" if use_candidate else \"squared_error\"\n        expected = 10.0 ** (np.median(clipped_logs) if use_candidate else np.mean(clipped_logs))\n        assert regressor.criterion == criterion\n        assert regressor.max_depth is None and regressor.bootstrap is False\n        assert regressor.random_state == seed and len(regressor.estimators_) == 400\n        for key in (\"n_estimators\", \"min_samples_leaf\", \"max_features\", \"n_jobs\"):\n            assert getattr(regressor, key) == config[key]\n        vectorizer = estimator.model.named_steps[\"vectorizer\"]\n        imputer = estimator.model.named_steps[\"imputer\"]\n        assert dict(zip(vectorizer.get_feature_names_out(), imputer.statistics_)) == {\n            \"empty_feature\": 0.0, \"log2_threshold\": 4.0, \"n_ops\": 10.0, \"threshold\": 16.0,\n        }\n        fitted_hash = joblib.hash(estimator)\n        predictions = estimator.predict(held_out, test_thresholds)\n        np.testing.assert_allclose(predictions, [expected] * 2, rtol=1e-12, atol=0)\n        assert predictions.shape == (2,)\n        assert np.all(np.isfinite(predictions))\n        assert np.all((predictions >= 1e-9) & (predictions <= 21600.0))\n        assert estimator.predict([], []).shape == (0,)\n        assert joblib.hash(estimator) == fitted_hash\n        assert \"held_out_only\" not in vectorizer.vocabulary_\n        with tempfile.TemporaryDirectory(prefix=\"criterion-smoke-\", dir=\"validation\") as tmp:\n            joblib.dump(estimator, Path(tmp) / \"model.joblib\")\n            adapter = RuntimeModel(artifacts_dir=tmp)\n            assert adapter.featurize(qasm_text=\"OPENQASM 2.0; qreg q[2]; h q[0];\")[\"n_ops\"] == 1\n            for row, threshold, value in zip(held_out, test_thresholds, predictions):\n                actual = adapter.predict(features=row, threshold=threshold)\n                assert isinstance(actual, float)\n                np.testing.assert_allclose(actual, value, rtol=1e-12, atol=0)\n        results.append({\"seed\": seed, \"criterion\": criterion,\n                        \"observed_seconds\": predictions.tolist(), \"expected_seconds\": float(expected)})\n# Adding a criterion key must not affect either unrelated model branch.\ncontrol_rows = [{\"n_ops\": float(i)} for i in range(1, 41)]\ncontrol_thresholds = [16 if i % 2 else 64 for i in range(40)]\ncontrol_targets = [float(i * i + 1) for i in range(40)]\nfor kind in (\"median\", \"hist_gradient_boosting\"):\n    base = {\"kind\": kind, \"max_iter\": 5, \"n_jobs\": 1}\n    first = fit_model(control_rows, control_thresholds, control_targets, 42, base)\n    second = fit_model(control_rows, control_thresholds, control_targets, 42,\n                       {**base, \"criterion\": \"absolute_error\"})\n    np.testing.assert_array_equal(first.predict(control_rows, control_thresholds),\n                                  second.predict(control_rows, control_thresholds))\nprint(json.dumps({\"status\": \"passed\", \"config\": config, \"loss_behavior\": results,\n                  \"other_branches_unchanged\": [\"median\", \"hist_gradient_boosting\"],\n                  \"training_scope\": \"synthetic fixtures only; no dataset labels read\",\n                  \"serialization_and_interfaces\": \"passed\",\n                  \"fold_local_preprocessing\": \"passed\",\n                  \"bounds_and_empty_predictions\": \"passed\"}, indent=2))\n'@ | & 'C:/Users/apier/OneDrive/Documents/Code/QuantumRings/ML-Agent/.venv/Scripts/python.exe' -B -\nexit $LASTEXITCODE",
+      "exit_code": 0,
+      "output": "{\r\n  \"status\": \"passed\",\r\n  \"config\": {\r\n    \"kind\": \"extra_trees\",\r\n    \"criterion\": \"absolute_error\",\r\n    \"n_estimators\": 400,\r\n    \"min_samples_leaf\": 2,\r\n    \"max_features\": 1.0,\r\n    \"n_jobs\": 4\r\n  },\r\n  \"loss_behavior\": [\r\n    {\r\n      \"seed\": 42,\r\n      \"criterion\": \"absolute_error\",\r\n      \"observed_seconds\": [\r\n        100.0,\r\n        100.0\r\n      ],\r\n      \"expected_seconds\": 100.0\r\n    },\r\n    {\r\n      \"seed\": 42,\r\n      \"criterion\": \"squared_error\",\r\n      \"observed_seconds\": [\r\n        2.156659091242822,\r\n        2.156659091242822\r\n      ],\r\n      \"expected_seconds\": 2.156659091242813\r\n    },\r\n    {\r\n      \"seed\": 43,\r\n      \"criterion\": \"absolute_error\",\r\n      \"observed_seconds\": [\r\n        100.0,\r\n        100.0\r\n      ],\r\n      \"expected_seconds\": 100.0\r\n    },\r\n    {\r\n      \"seed\": 43,\r\n      \"criterion\": \"squared_error\",\r\n      \"observed_seconds\": [\r\n        2.156659091242822,\r\n        2.156659091242822\r\n      ],\r\n      \"expected_seconds\": 2.156659091242813\r\n    }\r\n  ],\r\n  \"other_branches_unchanged\": [\r\n    \"median\",\r\n    \"hist_gradient_boosting\"\r\n  ],\r\n  \"training_scope\": \"synthetic fixtures only; no dataset labels read\",\r\n  \"serialization_and_interfaces\": \"passed\",\r\n  \"fold_local_preprocessing\": \"passed\",\r\n  \"bounds_and_empty_predictions\": \"passed\"\r\n}\r\n"
+    },
+    {
+      "id": "whitespace",
+      "cmd": "git diff --check",
+      "exit_code": 0,
+      "output": "warning: in the working copy of 'model_config.json', LF will be replaced by CRLF the next time Git touches it\nwarning: in the working copy of 'runtime_pipeline/learning.py', LF will be replaced by CRLF the next time Git touches it\n"
+    },
+    {
+      "id": "review-diff",
+      "cmd": "git diff -- runtime_pipeline/learning.py model_config.json",
+      "exit_code": 0,
+      "output": "warning: in the working copy of 'model_config.json', LF will be replaced by CRLF the next time Git touches it\nwarning: in the working copy of 'runtime_pipeline/learning.py', LF will be replaced by CRLF the next time Git touches it\ndiff --git a/model_config.json b/model_config.json\nindex 76ad69d..ad2226a 100644\n--- a/model_config.json\n+++ b/model_config.json\n@@ -1,5 +1,6 @@\n {\n   \"kind\": \"extra_trees\",\n+  \"criterion\": \"absolute_error\",\n   \"n_estimators\": 400,\n   \"min_samples_leaf\": 2,\n   \"max_features\": 1.0,\ndiff --git a/runtime_pipeline/learning.py b/runtime_pipeline/learning.py\nindex a568591..331917c 100644\n--- a/runtime_pipeline/learning.py\n+++ b/runtime_pipeline/learning.py\n@@ -72,6 +72,7 @@ def fit_model(feature_rows: list[dict], thresholds: list[int], targets_s: list[f\n         return FittedRuntimeEstimator(None, medians, float(np.median(targets)), dict(config))\n     if kind == \"extra_trees\":\n         regressor = ExtraTreesRegressor(\n+            criterion=config.get(\"criterion\", \"squared_error\"),\n             n_estimators=int(config.get(\"n_estimators\", 400)),\n             min_samples_leaf=int(config.get(\"min_samples_leaf\", 2)),\n             max_features=config.get(\"max_features\", 1.0),\n"
+    },
+    {
+      "id": "unchanged-protected-paths",
+      "cmd": "git diff --exit-code -- AGENTS.md runtime_pipeline/parser.py runtime_pipeline/model.py model.py run.py score.py pyproject.toml requirements.lock.txt tests README.md validation/measure_baseline.py",
+      "exit_code": 0,
+      "output": ""
+    },
+    {
+      "id": "working-tree",
+      "cmd": "git status --short",
+      "exit_code": 0,
+      "output": "warning: unable to access 'C:\\Users\\apier/.config/git/ignore': Permission denied\nwarning: unable to access 'C:\\Users\\apier/.config/git/ignore': Permission denied\n M model_config.json\n M runtime_pipeline/learning.py\n"
+    }
+  ]
+}

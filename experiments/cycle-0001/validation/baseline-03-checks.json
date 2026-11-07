@@ -1,0 +1,178 @@
+{
+  "run_id": "iqc-2026-runtime",
+  "cycle_id": "cycle-0001",
+  "step_id": "step-02-attempt-0-code",
+  "commands": [
+    {
+      "argv": [
+        "C:\\Users\\apier\\OneDrive\\Documents\\Code\\QuantumRings\\ML-Agent\\.venv\\Scripts\\python.exe",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tests",
+        "-v"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 4.526449199998751,
+      "stdout": "",
+      "stderr": "test_hist_gradient_boosting (test_learning.LearningTests.test_hist_gradient_boosting) ... ok\ntest_identity_and_invalid_targets_rejected (test_learning.LearningTests.test_identity_and_invalid_targets_rejected) ... ok\ntest_median_clips_before_aggregation_and_unseen_fallback (test_learning.LearningTests.test_median_clips_before_aggregation_and_unseen_fallback) ... ok\ntest_prediction_counts_and_alignment (test_learning.LearningTests.test_prediction_counts_and_alignment) ... ok\ntest_serialization_and_root_harness_contract (test_learning.LearningTests.test_serialization_and_root_harness_contract) ... ok\ntest_training_preprocessing_and_estimator_state_are_fold_local (test_learning.LearningTests.test_training_preprocessing_and_estimator_state_are_fold_local) ... ok\ntest_trees_fit_log10_of_clipped_seconds (test_learning.LearningTests.test_trees_fit_log10_of_clipped_seconds) ... ok\ntest_broadcast_operation_budget_and_partial_final_statement (test_parser.ParserTests.test_broadcast_operation_budget_and_partial_final_statement) ... ok\ntest_called_custom_broadcast_preserves_histogram_and_graph (test_parser.ParserTests.test_called_custom_broadcast_preserves_histogram_and_graph) ... ok\ntest_conditional_blocks_count_static_branches (test_parser.ParserTests.test_conditional_blocks_count_static_branches) ... ok\ntest_degree_moments_include_isolated_qubits (test_parser.ParserTests.test_degree_moments_include_isolated_qubits) ... ok\ntest_degree_statistics_use_bounded_number_of_array_traversals (test_parser.ParserTests.test_degree_statistics_use_bounded_number_of_array_traversals) ... ok\ntest_exhausted_budget_stops_later_statements_and_windows (test_parser.ParserTests.test_exhausted_budget_stops_later_statements_and_windows) ... ok\ntest_fast_path_declares_approximation_and_keeps_early_registers (test_parser.ParserTests.test_fast_path_declares_approximation_and_keeps_early_registers) ... ok\ntest_histogram_branch_at_exact_size_boundary (test_parser.ParserTests.test_histogram_branch_at_exact_size_boundary) ... ok\ntest_large_sample_is_explicit_and_histograms_remain_exact (test_parser.ParserTests.test_large_sample_is_explicit_and_histograms_remain_exact) ... ok\ntest_malformed_or_recursive_programs_rejected (test_parser.ParserTests.test_malformed_or_recursive_programs_rejected) ... ok\ntest_partial_broadcast_does_not_apply_complete_histogram_correction (test_parser.ParserTests.test_partial_broadcast_does_not_apply_complete_histogram_correction) ... ok\ntest_qasm2_inline_comments_and_register_broadcast (test_parser.ParserTests.test_qasm2_inline_comments_and_register_broadcast) ... ok\ntest_qasm3_nested_custom_gates_only_called_definitions (test_parser.ParserTests.test_qasm3_nested_custom_gates_only_called_definitions) ... ok\ntest_scalar_qubits_and_parallel_depth (test_parser.ParserTests.test_scalar_qubits_and_parallel_depth) ... ok\n\n----------------------------------------------------------------------\nRan 21 tests in 2.400s\n\nOK\n"
+    },
+    {
+      "argv": [
+        "C:\\Users\\apier\\OneDrive\\Documents\\Code\\QuantumRings\\ML-Agent\\.venv\\Scripts\\python.exe",
+        "-m",
+        "py_compile",
+        "validation/measure_baseline.py"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 0.09946859999763547,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "git",
+        "diff",
+        "--check"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 0.042678300000261515,
+      "stdout": "",
+      "stderr": "warning: in the working copy of 'README.md', LF will be replaced by CRLF the next time Git touches it\nwarning: in the working copy of 'runtime_pipeline/parser.py', LF will be replaced by CRLF the next time Git touches it\n"
+    },
+    {
+      "argv": [
+        "git",
+        "diff",
+        "--check"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 0.042835500000364846,
+      "stdout": "",
+      "stderr": "warning: in the working copy of 'README.md', LF will be replaced by CRLF the next time Git touches it\nwarning: in the working copy of 'runtime_pipeline/parser.py', LF will be replaced by CRLF the next time Git touches it\n"
+    },
+    {
+      "argv": [
+        "git",
+        "status",
+        "--short",
+        "--untracked-files=all"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 0.04329169999982696,
+      "stdout": " M README.md\n M runtime_pipeline/parser.py\n?? validation/baseline-03-checks.json\n?? validation/baseline-03-summary.md\n?? validation/baseline-03-timing/command.json\n?? validation/baseline-03-timing/command.log\n?? validation/baseline-03-timing/report.json\n?? validation/baseline-03-timing/seed-42/model.joblib\n?? validation/baseline-03-timing/seed-43/model.joblib\n?? validation/measure_baseline.py\n",
+      "stderr": "warning: unable to access 'C:\\Users\\apier/.config/git/ignore': Permission denied\nwarning: unable to access 'C:\\Users\\apier/.config/git/ignore': Permission denied\n"
+    }
+  ],
+  "unchanged_files": {
+    "run.py": {
+      "sha256": "64ff818d94304ca7bb508ff9af07a9791a8e93f01345a0e79f16ff792ced8b6b",
+      "unchanged_ignoring_line_endings": true
+    },
+    "score.py": {
+      "sha256": "9d81105f3bd3d5b65a018241cd876bdaa36ac9387221aa78ca9e5e23eb901528",
+      "unchanged_ignoring_line_endings": true
+    },
+    "model.py": {
+      "sha256": "1233fc1e19717ececa9c280149376ab8bf75182eac67ef8c2d4f5b7cfd0266ec",
+      "unchanged_ignoring_line_endings": true
+    },
+    "model_config.json": {
+      "sha256": "a7eacdd763c63ade97aa7bdd38dda4c37ebadd21908857d4791c0eb5f5aa45f6",
+      "unchanged_ignoring_line_endings": true
+    },
+    "runtime_pipeline/model.py": {
+      "sha256": "06d1e761fc5406b0b5c0458489319d872b451a40843050be0e0dd44a4654e527",
+      "unchanged_ignoring_line_endings": true
+    },
+    "runtime_pipeline/learning.py": {
+      "sha256": "b6efe4aab1e2dc45972a2abb7b3338fe92e691c63d38b4b85ce8539ddcad97ac",
+      "unchanged_ignoring_line_endings": true
+    },
+    "tests/test_parser.py": {
+      "sha256": "d08ba374bf4cb0d279aea599a6259224e20fa83aade0a0e5fa3f16777d43ad02",
+      "unchanged_ignoring_line_endings": true
+    },
+    "tests/test_learning.py": {
+      "sha256": "5348fd7fd05d042cbed8d90f0329aea9d8ae794b0bac2903b10702b802e1b439",
+      "unchanged_ignoring_line_endings": true
+    },
+    "runtime_pipeline/io.py": {
+      "sha256": "e5d3e33289f3d44fac65ab530412afc70970003da15fc664ff3209841c9e0ae1",
+      "unchanged_ignoring_line_endings": true
+    },
+    "runtime_pipeline/cli.py": {
+      "sha256": "d3cb53f7088df5b4453d4db5ecdb672ec43c0d19a7cf3915e5c29937522c578e",
+      "unchanged_ignoring_line_endings": true
+    },
+    "pyproject.toml": {
+      "sha256": "688ef9300c153b3e32db75f168bf922999a5ec09bdabeec650ba32509a900666",
+      "unchanged_ignoring_line_endings": true
+    },
+    "requirements.lock.txt": {
+      "sha256": "6c097a14c758fdb9ad69a3ec47b6aaaa92464b7d157f962d7940749e02127662",
+      "unchanged_ignoring_line_endings": true
+    }
+  },
+  "parser_executable_ast_unchanged": true,
+  "all_passed": true,
+  "timing_evidence_verification": {
+    "passed": true,
+    "training_parses_checked": 340,
+    "benchmark_parses_checked": 63,
+    "singleton_predictions_checked": 630,
+    "designated_circuits_match_public_packet": true,
+    "all_source_hashes_still_match_timing_report": true,
+    "all_protected_files_still_match_preflight": true,
+    "models": [
+      {
+        "seed": 42,
+        "trees": 400,
+        "root_training_samples_per_tree": 1692,
+        "vectorizer_features": 92,
+        "artifact_sha256_matches": true
+      },
+      {
+        "seed": 43,
+        "trees": 400,
+        "root_training_samples_per_tree": 1692,
+        "vectorizer_features": 92,
+        "artifact_sha256_matches": true
+      }
+    ],
+    "measurement_command": {
+      "argv": [
+        "C:\\Users\\apier\\OneDrive\\Documents\\Code\\QuantumRings\\ML-Agent\\.venv\\Scripts\\python.exe",
+        "validation/measure_baseline.py",
+        "--development-inputs",
+        "C:\\Users\\apier\\OneDrive\\Documents\\Code\\QuantumRings\\ML-Agent\\runs\\iqc-2026-runtime\\development\\inputs.json"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 179.09046060000037,
+      "finished_at": "2026-11-07T06:18:10.529335+00:00",
+      "combined_output": "validation/baseline-03-timing/command.log"
+    }
+  },
+  "affected_paths": [
+    "README.md",
+    "runtime_pipeline/parser.py",
+    "validation/measure_baseline.py",
+    "validation/baseline-03-checks.json",
+    "validation/baseline-03-summary.md",
+    "validation/baseline-03-timing/report.json",
+    "validation/baseline-03-timing/command.json",
+    "validation/baseline-03-timing/command.log",
+    "validation/baseline-03-timing/seed-42/model.joblib",
+    "validation/baseline-03-timing/seed-43/model.joblib"
+  ],
+  "new_and_changed_text_trailing_whitespace_errors": [],
+  "command_failures": [],
+  "final_review": {
+    "all_measured_calls_within_separate_caps": true,
+    "prediction_accounting_complete": true,
+    "changes_limited_to_documentation_comments_measurement_and_local_evidence": true,
+    "validation_score_computed": false,
+    "independent_controller_review_still_required": true
+  }
+}

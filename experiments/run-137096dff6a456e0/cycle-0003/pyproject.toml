@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "quantum-runtime-pipeline"
+version = "0.1.0"
+description = "Circuit-structure runtime regression for the IQC 2026 challenge"
+requires-python = ">=3.12"
+dependencies = ["numpy>=2", "scikit-learn>=1.6", "joblib>=1.4", "zstandard>=0.22", "threadpoolctl>=3.6"]
+
+[project.scripts]
+quantum-runtime = "runtime_pipeline.cli:main"
+
+[tool.setuptools]
+packages = ["runtime_pipeline"]
+py-modules = ["model"]

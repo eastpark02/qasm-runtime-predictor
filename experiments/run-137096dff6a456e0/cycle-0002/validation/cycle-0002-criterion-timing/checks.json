@@ -1,0 +1,95 @@
+{
+  "run_id": "iqc-2026-runtime",
+  "cycle_id": "cycle-0002",
+  "step_id": "step-02-attempt-0-code",
+  "role": "coder",
+  "manager_step_id": "criterion-03-candidate-timing",
+  "status": "passed",
+  "checked_at": "2026-11-07T07:26:51.012602+00:00",
+  "changed_paths": [
+    "validation/measure_candidate.py",
+    "tests/test_candidate_timing.py",
+    "validation/cycle-0002-criterion-timing/"
+  ],
+  "unittest": {
+    "command_argv": [
+      "C:\\Users\\apier\\OneDrive\\Documents\\Code\\QuantumRings\\ML-Agent\\.venv\\Scripts\\python.exe",
+      "-m",
+      "unittest",
+      "discover",
+      "-s",
+      "tests",
+      "-v"
+    ],
+    "exit_code": 0,
+    "tests_run": 26,
+    "reported_seconds": 5.718,
+    "failures": 0,
+    "errors": 0,
+    "suite_invocations": 1,
+    "result": "OK; observed before full timing run; not rerun for this record"
+  },
+  "measurement_command": {
+    "finished_at": "2026-11-07T07:25:39.1312662Z",
+    "started_at": "2026-11-07T07:21:45.7890923Z",
+    "exit_code": 0,
+    "command_argv": [
+      "C:/Users/apier/OneDrive/Documents/Code/QuantumRings/ML-Agent/.venv/Scripts/python.exe",
+      "-u",
+      "validation/measure_candidate.py",
+      "--development-inputs",
+      "C:/Users/apier/OneDrive/Documents/Code/QuantumRings/ML-Agent/runs/iqc-2026-runtime/development/inputs.json"
+    ]
+  },
+  "post_measurement_verification": {
+    "result": "passed",
+    "training_rows_per_seed": 1692,
+    "training_circuits": 340,
+    "benchmark_parses_verified": 63,
+    "singleton_predictions_verified": 630,
+    "complete_repeat_seed_threshold_grid": true,
+    "all_call_caps_and_prediction_bounds_passed": true,
+    "actual_fitted_settings_and_root_row_counts_verified": true,
+    "source_and_input_hashes_stable": true,
+    "model_artifact_hashes_verified": true,
+    "finished_before_deadline": true,
+    "new_source_whitespace_passed": true
+  },
+  "git_checks": [
+    {
+      "command_argv": [
+        "git",
+        "diff",
+        "--exit-code",
+        "HEAD"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": "warning: unable to access 'C:\\Users\\apier/.config/git/ignore': Permission denied\n"
+    },
+    {
+      "command_argv": [
+        "git",
+        "diff",
+        "--check"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    }
+  ],
+  "historical_preservation": "All previously tracked files match HEAD, including baseline script/evidence, production sources, configuration, and official run.py/score.py.",
+  "measurement_warnings": {
+    "`sklearn.utils.parallel.delayed` should be used with `sklearn.utils.parallel.Parallel` to make it possible to propagate the scikit-learn configuration of the current thread to the joblib workers.": 17446
+  },
+  "warning_assessment": "Existing scikit-learn parallel-configuration warnings were not suppressed. Calls still returned bounded finite results; this stage made no library or model-code changes. Warning handling/output overhead remains in measured call durations.",
+  "limitations": [
+    "Local timing only; no accuracy measurement or universal latency guarantee.",
+    "Three repeats without discarded warmups; training parses and fits precede benchmarks.",
+    "Only supplied fold-0 training labels are fitted; benchmark rows add no fitting data.",
+    "Circuit paths/names and hashes are joins/provenance only, never inference features.",
+    "Parser features retain existing sampling/approximation semantics.",
+    "The 15-second limits apply separately to parser and prediction, not fitting.",
+    "Deadline checked between stages; in-progress calls are not forcibly interrupted."
+  ]
+}

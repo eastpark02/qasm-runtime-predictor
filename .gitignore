@@ -2,8 +2,6 @@
 __pycache__/
 *.pyc
 *.egg-info/
-artifacts/
-experiments/
 .worktrees/
 data/
 .cache/
