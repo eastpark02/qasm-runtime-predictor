@@ -1,10 +1,11 @@
 import {useState} from 'react';
-import {ChartNoAxesColumnIncreasing, Clock3, FlaskConical} from 'lucide-react';
+import {ChartNoAxesColumnIncreasing, Clock3, FlaskConical, TriangleAlert} from 'lucide-react';
 import {seconds} from './api';
 import type {Explanation, FeatureResult, ModelInfo, Prediction, StepKind} from './types';
 import './runtime.css';
 
 type Importance = {available: boolean; note?: string; metric?: string; rows?: {feature: string; importance: number}[]};
+const RUNTIME_LIMIT_SECONDS = 360 * 60;
 function format(value: number) {return Number.isInteger(value) ? value.toLocaleString() : value.toPrecision(5);}
 export function featureEngine(result: FeatureResult) {
   const status = result.features.st_ok;
@@ -14,15 +15,44 @@ export function featureEngine(result: FeatureResult) {
   if (status === 0) return 'Unavailable · zero structural features';
   return result.provenance?.structural_feature_backend || 'Not reported';
 }
-export function RuntimePanel({step, stepKind, threshold, setThreshold, predictions, featureResult, model, busy, predict, inspect, explain, explanation, explaining, explanationError, importance, fullCircuit = false}: {
+export function RuntimePanel({step, stepKind, threshold, setThreshold, predictions, model, busy, predict, fullCircuit = false}: {
   step: number; stepKind: StepKind; threshold: number; setThreshold: (n: number) => void; predictions: Prediction[];
-  featureResult: FeatureResult | null; model?: ModelInfo; busy: string; predict: () => void; inspect: () => void; explain: () => void;
-  explanation: Explanation | null; explaining: boolean; explanationError: string; importance: Importance; fullCircuit?: boolean;
+  model?: ModelInfo; busy: string; predict: () => void; fullCircuit?: boolean;
 }) {
-  const [filter, setFilter] = useState(''), [featureView, setFeatureView] = useState<'raw' | 'derived'>('raw');
   const matching = predictions.filter(p => p.threshold === threshold && (p.step_kind || 'source') === stepKind).sort((a,b) => a.step-b.step);
   const current = matching.find(p => p.step === step), previous = [...matching].reverse().find(p => p.step < step);
+  const runtimeLimitReached = !!current && current.predicted_seconds >= RUNTIME_LIMIT_SECONDS;
+  const runtimeLimitExceeded = !!current && current.predicted_seconds > RUNTIME_LIMIT_SECONDS;
   const delta = current && previous ? current.predicted_seconds - previous.predicted_seconds : null;
+  return <aside className="runtime-column" aria-label="Simulator runtime and model details">
+    <section className="panel runtime-panel" aria-labelledby="runtime-heading"><div className="panel-heading"><div><div className="eyebrow">SIMULATOR RUNTIME</div><h2 id="runtime-heading">{fullCircuit ? 'Predict the full circuit' : 'Predict this prefix'}</h2></div><Clock3 size={20} aria-hidden="true"/></div>
+      <p className="muted">{fullCircuit ? 'Full circuit · original exact source, with no prefix selection.' : `A fresh run through ${stepKind === 'expanded' ? 'expanded instruction' : 'source step'} ${step}.`}</p>
+      <label className="field-label" htmlFor="threshold">Simulator threshold</label><select id="threshold" className="threshold-select" value={threshold} onChange={e => setThreshold(Number(e.target.value))}>{(model?.thresholds || [16,64,256,512,1024]).map(n => <option key={n} value={n}>{n}</option>)}</select>
+      <button className="button primary full" onClick={predict} disabled={!!busy || !model?.available}><Clock3 size={16}/>{busy === 'predict' ? 'Predicting…' : 'Predict runtime here'}</button>
+      <div className={`prediction-display${runtimeLimitReached ? ' prediction-limit-reached' : ''}`} aria-live="polite">
+        <span className="field-label">PREDICTED SIMULATOR TIME</span>
+        <strong>{current ? seconds(current.predicted_seconds) : '—'}</strong>
+        {runtimeLimitReached ? <div className="prediction-limit-warning">
+          <TriangleAlert size={24} aria-hidden="true"/>
+          <div><strong>360 min limit {runtimeLimitExceeded ? 'exceeded' : 'reached'}</strong><p>{runtimeLimitExceeded ? 'Predicted runtime exceeds 6 hours.' : 'Prediction reached the model’s 6-hour cap. Runtime may be longer.'}</p></div>
+        </div> : null}
+        <span>{current ? `${current.cached ? 'Cached' : 'Evaluated'} · ${fullCircuit ? 'Full circuit' : `step ${current.step}`} · threshold ${threshold}` : 'Run manually at this checkpoint'}</span>
+        {delta !== null ? <div className="prediction-delta">{delta >= 0 ? '+' : '−'}{seconds(Math.abs(delta))} vs evaluated step {previous?.step}</div> : null}
+      </div>
+      {current ? <div className="prediction-provenance"><span>Prediction: <strong>Python · {model?.config?.members ? `${model.config.members}-model ` : ''}{model?.config?.kind || 'runtime model'}</strong></span><span>Structural features: <strong>{featureEngine(current)}</strong></span><span>Checkpoint: <strong>{model?.version || 'fixed session'}</strong> · <code title={current.model_fingerprint}>{current.model_fingerprint?.slice(0,12)}</code></span>{['generated_expanded', 'generated_primitives'].includes(current.prefix_kind || '') ? <span className="prefix-warning">Generated primitive prefix · experimental. Text-based features can change at source boundaries.</span> : null}{current.provenance?.fallback_reason ? <span>{current.provenance.fallback_reason}</span> : null}</div> : null}
+      <div className="experimental"><FlaskConical size={15}/><span>{fullCircuit ? 'Experimental full-source estimate. The pinned extractor may report partial or fallback structural features; inspect its diagnostics.' : 'Experimental prefix estimate. Differences are model estimates, not measured gate costs.'}</span></div>
+      {matching.length ? <details className="history"><summary>Evaluated checkpoints ({matching.length})</summary>{matching.map(p => <div className="history-row" key={p.step}><span>Step {p.step}</span><strong>{seconds(p.predicted_seconds)}</strong><span className="muted">{p.cached ? 'cached' : 'evaluated'}</span></div>)}</details> : null}
+    </section>
+    <div className="model-note"><span className={`status-dot ${model?.available ? '' : 'offline'}`}/><div><strong>{model?.version || 'Model unavailable'}</strong><span>Python inference · {model?.config?.members ? `${model.config.members}-model blend` : model?.config?.kind || 'runtime predictor'}</span><code title={model?.fingerprint}>{model?.fingerprint?.slice(0,16) || model?.error || 'Connecting…'}</code><span>Fixed for this server session</span>{model?.provenance_note ? <details className="model-provenance"><summary>Training provenance · {model.rows_fitted?.toLocaleString()} rows</summary><p>{model.provenance_note}</p></details> : null}</div></div>
+  </aside>;
+}
+
+export function RuntimeDetails({step, stepKind, threshold, featureResult, model, busy, inspect, explain, explanation, explaining, explanationError, importance, predictionReady, fullCircuit = false}: {
+  step: number; stepKind: StepKind; threshold: number; featureResult: FeatureResult | null; model?: ModelInfo;
+  busy: string; inspect: () => void; explain: () => void; explanation: Explanation | null; explaining: boolean;
+  explanationError: string; importance: Importance; predictionReady: boolean; fullCircuit?: boolean;
+}) {
+  const [filter, setFilter] = useState(''), [featureView, setFeatureView] = useState<'raw' | 'derived'>('raw');
   const raw = featureResult?.features;
   const values = featureView === 'raw' ? raw : featureResult?.derived_features;
   const keys = Object.keys(values || {}).filter(k => k.toLowerCase().includes(filter.toLowerCase())).sort();
@@ -31,21 +61,12 @@ export function RuntimePanel({step, stepKind, threshold, setThreshold, predictio
   const maximum = Math.max(...bars.map(c => Math.abs(c.contribution)), .00000001);
   const remaining = explanation?.contribution_sum === undefined ? null : explanation.contribution_sum - bars.reduce((sum,c) => sum+c.contribution, 0);
   const contributionCount = explanation?.contribution_count ?? explanation?.contributions.length;
-  return <aside className="runtime-column">
-    <section className="panel runtime-panel"><div className="panel-heading"><div><div className="eyebrow">SIMULATOR RUNTIME</div><h2>{fullCircuit ? 'Predict the full circuit' : 'Predict this prefix'}</h2></div><Clock3 size={20}/></div>
-      <p className="muted">{fullCircuit ? 'Full circuit · original exact source, with no prefix selection.' : `A fresh run through ${stepKind === 'expanded' ? 'expanded instruction' : 'source step'} ${step}.`}</p>
-      <label className="field-label" htmlFor="threshold">Simulator threshold</label><select id="threshold" className="threshold-select" value={threshold} onChange={e => setThreshold(Number(e.target.value))}>{(model?.thresholds || [16,64,256,512,1024]).map(n => <option key={n} value={n}>{n}</option>)}</select>
-      <button className="button primary full" onClick={predict} disabled={!!busy || !model?.available}><Clock3 size={16}/>{busy === 'predict' ? 'Predicting…' : 'Predict runtime here'}</button>
-      <div className="prediction-display" aria-live="polite"><span className="field-label">PREDICTED SIMULATOR TIME</span><strong>{current ? seconds(current.predicted_seconds) : '—'}</strong><span>{current ? `${current.cached ? 'Cached' : 'Evaluated'} · ${fullCircuit ? 'Full circuit' : `step ${current.step}`} · threshold ${threshold}` : 'Run manually at this checkpoint'}</span>{delta !== null ? <div className="prediction-delta">{delta >= 0 ? '+' : '−'}{seconds(Math.abs(delta))} vs evaluated step {previous?.step}</div> : null}</div>
-      {current ? <div className="prediction-provenance"><span>Prediction: <strong>Python · {model?.config?.members ? `${model.config.members}-model ` : ''}{model?.config?.kind || 'runtime model'}</strong></span><span>Structural features: <strong>{featureEngine(current)}</strong></span><span>Checkpoint: <strong>{model?.version || 'fixed session'}</strong> · <code title={current.model_fingerprint}>{current.model_fingerprint?.slice(0,12)}</code></span>{['generated_expanded', 'generated_primitives'].includes(current.prefix_kind || '') ? <span className="prefix-warning">Generated primitive prefix · experimental. Text-based features can change at source boundaries.</span> : null}{current.provenance?.fallback_reason ? <span>{current.provenance.fallback_reason}</span> : null}</div> : null}
-      <div className="experimental"><FlaskConical size={15}/><span>{fullCircuit ? 'Experimental full-source estimate. The pinned extractor may report partial or fallback structural features; inspect its diagnostics.' : 'Experimental prefix estimate. Differences are model estimates, not measured gate costs.'}</span></div>
-      {matching.length ? <details className="history"><summary>Evaluated checkpoints ({matching.length})</summary>{matching.map(p => <div className="history-row" key={p.step}><span>Step {p.step}</span><strong>{seconds(p.predicted_seconds)}</strong><span className="muted">{p.cached ? 'cached' : 'evaluated'}</span></div>)}</details> : null}
-    </section>
-    <section className="panel features-panel"><div className="panel-heading"><div><div className="eyebrow">LOCAL MODEL EXPLANATION</div><h2>{explanation ? `${bars.length} prediction ${bars.length === 1 ? 'driver' : 'drivers'}` : 'Prediction drivers'}</h2></div><ChartNoAxesColumnIncreasing size={20}/></div>
+  return <div className="model-details-grid">
+    <section className="panel features-panel" aria-labelledby="prediction-drivers-heading"><div className="panel-heading"><div><div className="eyebrow">LOCAL MODEL EXPLANATION</div><h2 id="prediction-drivers-heading">{explanation ? `${bars.length} prediction ${bars.length === 1 ? 'driver' : 'drivers'}` : 'Prediction drivers'}</h2></div><ChartNoAxesColumnIncreasing size={20} aria-hidden="true"/></div>
       <p className="small muted">Up to 10 largest absolute SHAP contributions across raw features and derived inputs · log₁₀(seconds). Contributions explain this model, not causal effects.</p>
       <p className="small muted">Selected: {fullCircuit ? 'Full circuit' : `${stepKind} step ${step}`} · threshold {threshold}. Explanations follow this selection.</p>
       <button className="button full" onClick={explain} disabled={explaining || !!busy || !model?.available || model.explanation_available === false}>{explaining ? 'Calculating explanation…' : explanationError ? 'Retry explanation' : explanation ? 'Refresh explanation' : 'Explain this checkpoint'}</button>
-      {explaining ? <p role="status" className="shap-status">Calculating explanation for step {step}…{current ? ' Prediction is ready.' : ''}</p> : null}
+      {explaining ? <p role="status" className="shap-status">Calculating explanation for step {step}…{predictionReady ? ' Prediction is ready.' : ''}</p> : null}
       {explanationError ? <div className="shap-error" role="status"><p>Explanation unavailable: {explanationError}</p></div> : null}
       {!explanation && !explaining && !explanationError ? <p className="small muted">{model?.explanation_available === false ? 'This checkpoint does not support SHAP explanations.' : 'No explanation for this selection yet. Explain this checkpoint or predict runtime to calculate one.'}</p> : null}
       {explanation ? <div className="shap-chart" aria-label={`${bars.length} signed SHAP contributions`}>
@@ -60,7 +81,7 @@ export function RuntimePanel({step, stepKind, threshold, setThreshold, predictio
         {explanation.postprocessing_applied ? <p className="prefix-warning">The model’s timeout rule or runtime cap changed the final prediction. These bars explain the raw blend before that adjustment.</p> : null}
       </div> : null}
     </section>
-    <section className="panel features-panel"><div className="panel-heading"><div><div className="eyebrow">MODEL INPUTS</div><h2>All circuit features</h2></div></div>
+    <section className="panel features-panel" aria-labelledby="circuit-features-heading"><div className="panel-heading"><div><div className="eyebrow">MODEL INPUTS</div><h2 id="circuit-features-heading">All circuit features</h2></div></div>
       <button className="button full" onClick={inspect} disabled={!!busy || !model?.available}>{busy === 'features' ? 'Extracting…' : 'Inspect features here'}</button>
       {featureResult ? <><p className="small muted">Step {featureResult.step} · {featureResult.step_kind || 'source'}{featureResult.threshold !== undefined ? ` · threshold ${featureResult.threshold}` : ''}{staleFeatures ? ' · previous checkpoint' : ''}</p><p className="small muted">Structural features: {featureEngine(featureResult)}</p>
         <div className="feature-tabs" aria-label="Feature category"><button aria-pressed={featureView === 'raw'} onClick={() => setFeatureView('raw')}>Raw features ({Object.keys(raw || {}).length})</button><button aria-pressed={featureView === 'derived'} onClick={() => setFeatureView('derived')}>Derived inputs ({Object.keys(featureResult.derived_features || {}).length})</button></div>
@@ -71,7 +92,6 @@ export function RuntimePanel({step, stepKind, threshold, setThreshold, predictio
       </> : <p className="small muted">Inspect all extracted values without requesting a prediction.</p>}
       <details className="explain-details"><summary>Global feature importance</summary>{importance.available ? <><p className="small">Development validation · {importance.metric}</p>{importance.rows?.map(r => <div className="attribution" key={r.feature}><span>{r.feature}</span><strong>{r.importance.toFixed(4)}</strong></div>)}</> : <p className="small muted">{importance.note || 'No approved development-validation report is installed.'}</p>}</details>
     </section>
-    <div className="model-note"><span className={`status-dot ${model?.available ? '' : 'offline'}`}/><div><strong>{model?.version || 'Model unavailable'}</strong><span>Python inference · {model?.config?.members ? `${model.config.members}-model blend` : model?.config?.kind || 'runtime predictor'}</span><code title={model?.fingerprint}>{model?.fingerprint?.slice(0,16) || model?.error || 'Connecting…'}</code><span>Fixed for this server session</span>{model?.provenance_note ? <details className="model-provenance"><summary>Training provenance · {model.rows_fitted?.toLocaleString()} rows</summary><p>{model.provenance_note}</p></details> : null}</div></div>
-  </aside>;
+  </div>;
 }
 

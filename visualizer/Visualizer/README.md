@@ -116,9 +116,58 @@ center; local RY/RZ gates can change the joint state without changing that fact.
 Bloch arrows are coordinates, not physical trajectories or entanglement directions.
 Bitstrings use Qiskit's convention: **q[n−1]…q[0]**.
 
-State calculations allow 12 qubits and 10,000 expanded operations. Custom gate
-bodies are recursively checked before evolving the state, with a 64-level nesting
-limit. Calculation workers are killed after 10 seconds (including startup).
+State calculations run manually for one selected qubit or a selected pair. The
+
+backend walks backward through every multi-qubit dependency before dropping
+
+irrelevant operations; selecting an output does not discard entangled inputs.
+
+The reported causal cone can be smaller than the source circuit. Auto uses exact
+
+Qiskit stabilizer evolution for supported Clifford cones (up to 512 qubits),
+
+otherwise a floating-point statevector through 22 cone qubits, otherwise Aer MPS
+
+through 128 cone qubits. The response and UI identify the actual method and accuracy.
+
+MPS is always labeled approximate: the default maximum bond is 64 and truncation
+
+cutoff is 1e-10, adjustable within 2–128 and 0–0.001. No certified error bound is
+
+claimed. Compare larger bonds and smaller cutoffs for convergence; arbitrary wide,
+
+highly entangled circuits are not guaranteed to fit these budgets.
+
+
+
+Each result includes only the selected Bloch vectors, P0/P1, purity, entropy and,
+
+for a pair, XX/YY/ZZ correlations and concurrence. Full joint outcomes, phases and
+
+amplitudes are optional and restricted to 12 **total** circuit qubits. Only this
+
+explicit small global calculation creates a complete ideal distribution for cloud
+
+comparison; selected marginals never become a global reference. Its preview shows
+
+at most 64 outcomes, while the complete reference contains at most 4096 entries.
+
+
+
+There is one state worker, a 30-second wall budget including startup, and a 1 GiB
+
+Windows Job Object memory budget with process-tree cleanup. Statevector storage is
+
+16 × 2^n bytes before workspace, with an independent hard 22-qubit cone ceiling.
+
+All methods retain a 10,000-expanded-operation and 64-level custom-gate nesting
+
+budget. Source hash/checkpoint, selected qubits, requested method, joint option and
+
+MPS settings identify the bounded result cache. Timeout, memory and unsupported
+
+method failures produce errors instead of fabricated state metrics.
+
 Measurement, reset and conditional branches are visible state boundaries.
 Conditional `if` blocks can be uploaded and inspected as collapsed, unevaluated
 source steps; runtime features use the unchanged source and upstream structural
@@ -161,7 +210,7 @@ source prediction. Upstream parser failures that would substitute all-zero raw
 features are surfaced as failures in this mode. Native feature fallback/truncation
 remains labeled without changing the predictor's features.
 
-State calculations retain their independent 12-qubit/10,000-operation limits.
+State calculations use the independent method, causal-cone and operation budgets above.
 Four circuit records, 64 feature/prediction results and two concurrent uploads
 are bounded per session. File-backed records are removed on eviction and shutdown;
 active extraction leases defer deletion. There are at most two parse/state workers.
@@ -222,3 +271,19 @@ Qiskit fixtures, an interactive Three.js gallery and a GNU Makefile. It is a
 portable prototype for review on another machine; the main app keeps its existing
 Qiskit state panel. Camera rotation does not change quantum state. The demo's own
 README documents `make demo`, optional fixture/asset regeneration and requirements.
+
+
+Selected-state implementation references: [Aer simulator methods and memory/MPS
+
+options](https://qiskit.github.io/qiskit-aer/stubs/qiskit_aer.AerSimulator.html),
+
+[Aer selected density-matrix saves](https://qiskit.github.io/qiskit-aer/stubs/qiskit_aer.library.save_density_matrix.html),
+
+and [Qiskit observable light cones](https://quantum.cloud.ibm.com/docs/en/api/qiskit/qiskit.transpiler.passes.LightCone).
+
+The app uses a conservative whole-subsystem backward support cone rather than a
+
+single-Pauli observable cone. The simulator dependency is pinned to Aer 0.18.2;
+
+the deployed integration was checked with Qiskit 2.6.2.
+

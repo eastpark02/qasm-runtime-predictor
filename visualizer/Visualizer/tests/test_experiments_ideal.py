@@ -6,7 +6,7 @@ from visualizer.qbraid_service import map_ideal
 
 def test_dense_seven_qubit_state_retains_complete_reference_for_partial_swapped_mapping():
     source = 'OPENQASM 2.0; include "qelib1.inc"; qreg q[7]; h q;'
-    state = _state({'qasm': source, 'pair': [0, 1]})
+    state = _state({'qasm': source, 'pair': [0, 1], 'include_joint': True})
     assert len(state['joint']) == 64 and state['joint_total'] == 128
     ideal = state['ideal_probabilities']
     assert len(ideal) == 128 and sum(ideal.values()) == pytest.approx(1)
