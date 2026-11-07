@@ -1,5 +1,10 @@
 # Quantum Circuit Explorer
 
+This is the canonical local Visualizer in `qasm-runtime-predictor/visualizer/Visualizer`.
+Make all Visualizer changes here and launch this copy with `start.ps1`.
+The separate `QuantumRings/Visualizer` directory is obsolete.
+`/api/health` reports `application_root` so the running folder can be verified.
+
 A local React/TypeScript + FastAPI workbench for stepping through QASM, manually
 predicting simulator runtime, and calculating small ideal quantum states.
 

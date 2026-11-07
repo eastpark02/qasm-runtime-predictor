@@ -10,6 +10,7 @@ if (-not $NoBrowser) {
     $launcher = Join-Path $PSScriptRoot 'scripts/open-browser.ps1'
     Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"' + $launcher + '"')) -WindowStyle Hidden | Out-Null
 }
+Write-Host "Application folder: $PSScriptRoot"
 Write-Host 'Quantum Circuit Explorer: http://127.0.0.1:8000'
 Write-Host 'Loopback only. Stop with Ctrl+C. Restart explicitly to load a newer model checkpoint.'
 & $venvPython -m uvicorn visualizer.app:app --host 127.0.0.1 --port 8000

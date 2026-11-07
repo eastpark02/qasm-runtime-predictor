@@ -66,7 +66,7 @@ class LRU:
 class Settings:
     root: Path = ROOT
     pipeline: Path = Path(os.environ.get('VISUALIZER_PIPELINE', str(ROOT.parent / 'ml-agent-pipeline')))
-    predictor: Path = Path(os.environ.get('VISUALIZER_PREDICTOR', str(ROOT.parent / 'quantum-runtime-prediction-model' / 'qasm-runtime-predictor')))
+    predictor: Path = Path(os.environ.get('VISUALIZER_PREDICTOR', str(ROOT.parents[1])))
     model_provider: str = os.environ.get('VISUALIZER_MODEL', 'dev')
     state_timeout: float = STATE_TIMEOUT_SECONDS
     max_upload_bytes: int = field(default_factory=lambda: int(os.environ.get('VISUALIZER_MAX_UPLOAD_BYTES', DEFAULT_UPLOAD_BYTES)))
@@ -89,7 +89,7 @@ class Checkpoint(BaseModel):
 
 
 class StateCheckpoint(Checkpoint):
-    qubits: tuple[int, ...] | None = Field(default=None, min_length=1, max_length=2)
+    qubits: tuple[int, ...] | None = Field(default=None, min_length=1, max_length=3)
     method: Literal['auto', 'stabilizer', 'statevector', 'matrix_product_state'] = 'auto'
     include_joint: bool = False
     mps_max_bond: int = Field(default=64, ge=2, le=128)
@@ -426,7 +426,7 @@ def create_app(settings=None, model=None):
             inspector = {'available': True, 'backend': 'app_owned_cpp', 'fingerprint': build['binary_sha256'], 'upstream_commit': build['commit']}
         except (OSError, ValueError, KeyError) as exc:
             inspector = {'available': False, 'error': str(exc), 'fallback': 'python_source'}
-        return {'ok': True, 'model': app.state.model.info, 'access': {'scope': 'development_only', 'approved_files': len(app.state.policy.entries), 'source': app.state.policy.source},
+        return {'ok': True, 'application_root': str(settings.root.resolve()), 'model': app.state.model.info, 'access': {'scope': 'development_only', 'approved_files': len(app.state.policy.entries), 'source': app.state.policy.source},
                 'inspection': inspector, 'limits': {'statevector_qubits': STATE_VECTOR_QUBITS, 'state_stabilizer_qubits': STATE_STABILIZER_QUBITS, 'state_mps_qubits': STATE_MPS_QUBITS, 'state_joint_qubits': STATE_JOINT_QUBITS, 'state_operations': STATE_OPERATIONS, 'state_memory_bytes': STATE_MEMORY_BYTES, 'state_workers': 1, 'inspection_operations': 100_000, 'inspection_qubits': 2048, 'nesting': 64, 'workers': 2, 'inspection_attempt_timeout_seconds': 10, 'state_timeout_seconds': settings.state_timeout, 'upload_bytes': settings.max_upload_bytes, 'interactive_bytes': INTERACTIVE_BYTES, 'python_fallback_bytes': PYTHON_FALLBACK_BYTES, 'large_feature_timeout_seconds': settings.large_feature_timeout, 'large_feature_memory_bytes': settings.large_feature_memory_bytes, 'large_feature_workers': 1, 'native_output_bytes': 64 * 1024 * 1024, 'metadata_preview_chars': 4096, 'window_size': WINDOW_SIZE, 'windows_cached': WINDOWS_CACHED}}
 
     @app.get('/api/examples')
