@@ -169,13 +169,17 @@ def prefix(source: str, parsed: dict, step: int) -> str:
         raise ValueError("Step is outside this circuit")
     if step == parsed['total_steps']:
         return source  # Exact full-source featurization, including formatting.
-    cutoff = parsed['steps'][step - 1]['end'] if step else 0
+    return prefix_at(source, parsed['declarations'], parsed['steps'][step - 1]['end'] if step else 0)
+
+
+def prefix_at(source: str, declarations, cutoff: int) -> str:
+    """Source through the statement ending at character offset `cutoff`."""
     # Blank future statements rather than rewriting earlier source or gate bodies.
     # Keep declarations regardless of their position, preserving original order.
     # Earlier text is exact, including formatting; later declarations remain in
     # place. Chunked blanking avoids a list of millions of Python characters.
     chunks, cursor = [source[:cutoff]], cutoff
-    for start, end in sorted(parsed['declarations']):
+    for start, end in sorted(declarations):
         if end <= cursor:
             continue
         start = max(cursor, start)

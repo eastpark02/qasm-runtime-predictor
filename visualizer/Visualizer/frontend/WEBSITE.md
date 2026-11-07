@@ -88,3 +88,28 @@ npm.cmd run test:e2e
 Without `VISUALIZER_TEST_URL`, Playwright starts its own server as before; port
 8000 must be free. Screenshots whose names include `ui-contract` contain test
 fixtures and are not evidence of native model execution.
+
+## Windowed native inspection (2026-11-07)
+
+When the backend reports `inspection_mode: 'windowed'` (a file under the
+interactive byte limit whose top-level statements exceed the 100,000-record
+inspection limit), the circuit summary also carries:
+
+```typescript
+{
+  step_kind: 'source';            // no expanded navigation; /instructions returns 422
+  total_steps: number;            // all top-level statements
+  window_size: number;            // 100,000
+  windows: Array<{index: number; start_step: number; end_step: number; byte_offset: number}>;
+}
+```
+
+The explorer then shows a **Statement window** select above the viewport
+("Statements 1–100,000", "100,001–200,000", …; the window holding the selected
+step is highlighted). Choosing one only selects that window's first step; the
+existing `/steps?offset&limit` paging (200 per page) fetches it, and the server
+resolves global offsets to windows. The stats line reads "windowed native
+inspection · N statements" and the badge "C++ windowed". Slider, step input,
+overview, and the manual predict/features/state/stepper actions are unchanged.
+`tests/windowed.spec.ts` checks this with synthetic HTTP fixtures only; it does
+not exercise the native inspector or the backend windowed mode.

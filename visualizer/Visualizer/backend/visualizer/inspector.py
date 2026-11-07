@@ -7,7 +7,7 @@ import tempfile
 import time
 from bisect import bisect_left
 
-from .circuits import BOUNDARIES, source_parts, newline_offsets
+from .circuits import BOUNDARIES, Span, source_parts, newline_offsets
 from .limits import DEFAULT_UPLOAD_BYTES, validate_upload_bytes, preview
 
 
@@ -38,12 +38,18 @@ def primitive_source(record, labels, clabels):
     return record['name'] + parameter_text + (' ' + args if args else '') + ';'
 
 
-def native_parse(source, root, expected_fingerprint=None, *, max_bytes=DEFAULT_UPLOAD_BYTES):
-    validate_upload_bytes(max_bytes)
-    deadline = time.perf_counter() + 10
+WINDOW_SIZE = 100_000
+
+
+def _executable(root, expected_fingerprint):
     executable, build = verified_inspector(root)
     if expected_fingerprint is not None and build['binary_sha256'] != expected_fingerprint:
         raise ValueError('Inspector changed since server startup; restart with a verified build')
+    return executable, build
+
+
+def _invoke(executable, source, args, deadline, max_bytes):
+    """Run the native inspector on an exact UTF-8 copy of `source`; returns parsed JSON."""
     with tempfile.TemporaryDirectory(prefix='visualizer-inspect-') as directory:
         path = Path(directory) / 'circuit.qasm'
         data = source.encode('utf-8')
@@ -55,7 +61,8 @@ def native_parse(source, root, expected_fingerprint=None, *, max_bytes=DEFAULT_U
             # File output avoids unbounded pipe accumulation; the native writer
             # refuses output past 64 MiB before adding it to the stream.
             with (Path(directory) / 'inspection.json').open('w+b') as output:
-                result = subprocess.run([str(executable), str(path), str(max_bytes)], stdout=output, stderr=subprocess.PIPE,
+                command = [str(executable), *args[:1], str(path), *args[1:], str(max_bytes)]
+                result = subprocess.run(command, stdout=output, stderr=subprocess.PIPE,
                                         timeout=max(.001, deadline - time.perf_counter()),
                                         creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
                 if result.returncode:
@@ -63,12 +70,19 @@ def native_parse(source, root, expected_fingerprint=None, *, max_bytes=DEFAULT_U
                 if output.tell() > 64 * 1024 * 1024:
                     raise ValueError('Native inspection output exceeds 64 MiB')
                 output.seek(0)
-                parsed = json.load(output)
+                return json.load(output)
         except subprocess.TimeoutExpired as exc:
             raise TimeoutError('Native inspection exceeded 10 seconds') from exc
-    declarations, operations, definitions = source_parts(source, deadline)
-    if any(s.text.startswith('if') for s in operations):
-        raise ValueError('Conditional statements require collapsed SOURCE inspection')
+
+
+def _align(source, parsed, operations, definitions, deadline, *, newlines=None, regions=None, step_base=0, op_base=0):
+    """Attach exact source spans/previews to native records.
+
+    Shared by whole-file and windowed inspection. `regions` lists
+    (char_start, char_end, byte_start) text ranges containing native offsets;
+    `step_base`/`op_base` are the global source step and instance counts before
+    the first statement in `operations`.
+    """
     # Native offsets count UTF-8 bytes; Python source spans count Unicode chars.
     native_records = parsed.pop('instructions')
     needed_offsets = {record[key] for record in native_records for key in ('start', 'end', 'definition_start')}
@@ -76,13 +90,14 @@ def native_parse(source, root, expected_fingerprint=None, *, max_bytes=DEFAULT_U
     if source.isascii():
         byte_offsets.update((offset, offset) for offset in needed_offsets)
     else:
-        cursor = 0
-        for index, char in enumerate(source):
-            cursor += len(char.encode('utf-8'))
-            if cursor in needed_offsets:
-                byte_offsets[cursor] = index + 1
+        for char_start, char_end, cursor in regions or [(0, len(source), 0)]:
+            byte_offsets[cursor] = char_start
+            for index in range(char_start, char_end):
+                cursor += len(source[index].encode('utf-8'))
+                if cursor in needed_offsets:
+                    byte_offsets[cursor] = index + 1
     instructions, grouped = [], [[] for _ in operations]
-    newlines = newline_offsets(source)
+    newlines = newline_offsets(source) if newlines is None else newlines
     body_truncated = {name: len(body) > 4096 for name, body in definitions.items()}
     definitions = {name: preview(body) for name, body in definitions.items()}
     origins = [(preview(source[span.start:span.end]), bisect_left(newlines, span.start) + 1) for span in operations]
@@ -90,7 +105,7 @@ def native_parse(source, root, expected_fingerprint=None, *, max_bytes=DEFAULT_U
     for index, record in enumerate(native_records):
         if index % 1024 == 0 and time.perf_counter() > deadline:
             raise TimeoutError('Source alignment exceeded the 10-second inspection deadline')
-        origin = record['source_step'] - 1
+        origin = record['source_step'] - 1 - step_base
         if not 0 <= origin < len(operations):
             raise ValueError('Native source alignment is incomplete')
         span = operations[origin]
@@ -110,11 +125,11 @@ def native_parse(source, root, expected_fingerprint=None, *, max_bytes=DEFAULT_U
         instructions.append(record)
         grouped[origin].append(record)
     steps = []
-    source_cursor, expanded_cursor = 0, 0
+    source_cursor, expanded_cursor = op_base, 0
     for index, (span, records) in enumerate(zip(operations, grouped)):
         name = parsed['source_names'][index]
         first = records[0] if records else {}
-        steps.append({**first, 'step': index + 1, 'name': name, 'source': origins[index][0],
+        steps.append({**first, 'step': step_base + index + 1, 'name': name, 'source': origins[index][0],
                       'start': span.start, 'end': span.end, 'line': origins[index][1],
                       'qubits': parsed['source_qubits'][index], 'clbits': parsed['source_clbits'][index],
                       'parameters': [{'expression': repr(v), 'value': v} for v in parsed['source_parameters'][index]],
@@ -125,6 +140,18 @@ def native_parse(source, root, expected_fingerprint=None, *, max_bytes=DEFAULT_U
                       'body': definitions.get(name), 'body_truncated': body_truncated.get(name, False), 'state_boundary': any(r['state_boundary'] for r in records)})
         source_cursor += parsed['source_widths'][index]
         expanded_cursor += len(records)
+    return instructions, steps
+
+
+def native_parse(source, root, expected_fingerprint=None, *, max_bytes=DEFAULT_UPLOAD_BYTES):
+    validate_upload_bytes(max_bytes)
+    deadline = time.perf_counter() + 10
+    executable, build = _executable(root, expected_fingerprint)
+    parsed = _invoke(executable, source, [], deadline, max_bytes)
+    declarations, operations, definitions = source_parts(source, deadline)
+    if any(s.text.startswith('if') for s in operations):
+        raise ValueError('Conditional statements require collapsed SOURCE inspection')
+    instructions, steps = _align(source, parsed, operations, definitions, deadline)
     parsed.update(steps=steps, total_steps=len(steps), instructions=instructions, total_instructions=len(instructions),
                   state_boundary=next((s['step'] for s in steps if s['state_boundary']), None),
                   expanded_state_boundary=next((s['step'] for s in instructions if s['state_boundary']), None),
@@ -132,6 +159,81 @@ def native_parse(source, root, expected_fingerprint=None, *, max_bytes=DEFAULT_U
                   inspection_backend='app_owned_cpp', inspector_fingerprint=build['binary_sha256'],
                   fallback_reason=None, warnings=[])
     return parsed
+
+
+def native_index(source, root, expected_fingerprint=None, *, max_bytes=DEFAULT_UPLOAD_BYTES):
+    """Windowed inspection index for sources above the 100,000-statement limit.
+
+    Declarations and definitions are parsed and validated exactly as in
+    whole-file inspection; every top-level call is parsed but not expanded.
+    Windows of WINDOW_SIZE statements are inspected later by native_window().
+    """
+    validate_upload_bytes(max_bytes)
+    deadline = time.perf_counter() + 10
+    executable, build = _executable(root, expected_fingerprint)
+    index = _invoke(executable, source, ['--index'], deadline, max_bytes)
+    total, offsets = index['total_statements'], index['window_offsets']
+    if (index['window_size'] != WINDOW_SIZE or total < 1 or len(offsets) != -(-total // WINDOW_SIZE)
+            or len(index['window_op_offsets']) != len(offsets)):
+        raise ValueError('Native windowed index is inconsistent')
+    # Character offsets of each window's first statement (identical for ASCII).
+    if source.isascii():
+        chars = list(offsets)
+    else:
+        data, chars, previous_byte, previous_char = source.encode('utf-8'), [], 0, 0
+        for offset in offsets:
+            previous_char += len(data[previous_byte:offset].decode('utf-8'))
+            previous_byte = offset
+            chars.append(previous_char)
+        del data
+    declarations, operations, definitions = source_parts(source[:chars[0]], deadline)
+    if operations:
+        raise ValueError('Windowed index alignment failed: statements precede the first indexed statement')
+    newlines = newline_offsets(source)
+    if time.perf_counter() > deadline:
+        raise TimeoutError('Windowed index exceeded the 10-second inspection deadline')
+    windows = [{'index': k, 'start_step': k * WINDOW_SIZE + 1, 'end_step': min(total, (k + 1) * WINDOW_SIZE), 'byte_offset': offset}
+               for k, offset in enumerate(offsets)]
+    return {'num_qubits': index['num_qubits'], 'num_clbits': index['num_clbits'],
+            'qubit_labels': index['qubit_labels'], 'clbit_labels': index['clbit_labels'],
+            'total_steps': total, 'total_instructions': None, 'steps': [],
+            'state_boundary': index['state_boundary'], 'expanded_state_boundary': None,
+            'declarations': [(s.start, s.end) for s in declarations], 'step_kind': 'source',
+            'window_size': WINDOW_SIZE, 'windows': windows, 'bucket_counts': index['bucket_counts'],
+            'has_definitions': index['has_definitions'], 'inspection_mode': 'windowed',
+            'inspection_backend': 'app_owned_cpp_windowed', 'inspector_fingerprint': build['binary_sha256'],
+            'fallback_reason': None, 'warnings': [],
+            # Internal: not serialized by summary().
+            '_window_chars': chars, '_window_op_offsets': index['window_op_offsets'],
+            '_definitions': definitions, '_newlines': newlines}
+
+
+def native_window(source, parsed, k, root, expected_fingerprint=None, *, max_bytes=DEFAULT_UPLOAD_BYTES):
+    """Source-step records for window k (global steps k*WINDOW_SIZE+1 ...)."""
+    validate_upload_bytes(max_bytes)
+    deadline = time.perf_counter() + 10
+    executable, _ = _executable(root, expected_fingerprint)
+    window = parsed['windows'][k]
+    count = window['end_step'] - window['start_step'] + 1
+    raw = _invoke(executable, source, ['--window', str(window['byte_offset']), str(window['start_step'] - 1), str(count)], deadline, max_bytes)
+    if raw['window']['statements_inspected'] != count:
+        raise ValueError(f"Native window inspected {raw['window']['statements_inspected']:,} of {count:,} statements")
+    chars = parsed['_window_chars']
+    start, end = chars[k], chars[k + 1] if k + 1 < len(chars) else len(source)
+    declarations, segment, _ = source_parts(source[start:end], deadline)
+    if declarations or len(segment) != count:
+        raise ValueError('Windowed source alignment differs from the native window')
+    operations = [Span(s.start + start, s.end + start, s.text) for s in segment]
+    if any(s.text.startswith('if') for s in operations):
+        raise ValueError('Conditional statements require collapsed SOURCE inspection')
+    _, steps = _align(source, raw, operations, parsed['_definitions'], deadline, newlines=parsed['_newlines'],
+                      regions=[(0, chars[0], 0), (start, end, window['byte_offset'])],
+                      step_base=window['start_step'] - 1, op_base=parsed['_window_op_offsets'][k])
+    for step in steps:
+        # Expanded navigation is unavailable in windowed mode; window-local
+        # expanded counts would look global, so they are not reported.
+        step.update(expanded_start=None, expanded_end=None)
+    return steps
 
 
 def expanded_prefix(source, parsed, step):

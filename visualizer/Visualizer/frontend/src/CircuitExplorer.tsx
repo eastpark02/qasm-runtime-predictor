@@ -3,7 +3,7 @@ import type {PointerEvent as ReactPointerEvent} from 'react';
 import {ArrowLeft, ArrowRight, Check, Focus, Maximize2, Minimize2, RotateCcw, Scan, ZoomIn, ZoomOut} from 'lucide-react';
 import {api} from './api';
 import {totalFor} from './types';
-import type {Circuit, Step, StepKind} from './types';
+import type {Circuit, Step, StepKind, StatementWindow} from './types';
 import './explorer.css';
 
 const COLUMN = 96, ROW = 64, LEFT = 72, TOP = 36, PAGE = 200;
@@ -23,6 +23,11 @@ export function CircuitExplorer({circuit, stepKind, selected, select, nearby}: {
   const pointers = useRef(new Map<number, {x: number; y: number; startX: number; startY: number}>());
   const suppressClick = useRef(false);
   const total = totalFor(circuit, stepKind);
+  // Windowed native inspection: the server inspects one statement window at a
+  // time; this control only moves the selection, and normal paging fetches it.
+  const windowed = circuit.inspection_mode === 'windowed', windowSize = circuit.window_size || 100000;
+  const windows: StatementWindow[] = !windowed ? [] : circuit.windows?.length ? circuit.windows : Array.from({length: Math.ceil(total / windowSize)}, (_, index) => ({index, start_step: index * windowSize + 1, end_step: Math.min(total, (index + 1) * windowSize), byte_offset: -1}));
+  const currentWindow = Math.max(0, windows.findIndex(w => Math.max(1, selected) >= w.start_step && Math.max(1, selected) <= w.end_step));
   const worldWidth = Math.max(1, total) * COLUMN, worldHeight = Math.max(1, (circuit.num_qubits ?? 0)) * ROW;
   const selectedStep = nearby.find(s => s.step === selected) || visible.find(s => s.step === selected);
   const bounded = useCallback((value: Camera): Camera => ({...value,
@@ -182,8 +187,8 @@ export function CircuitExplorer({circuit, stepKind, selected, select, nearby}: {
   const displayed = visible.filter(s => s.step > first && s.step <= last);
   return <section id="circuit-checkpoint" tabIndex={-1} ref={panel} className={`panel circuit-panel circuit-explorer ${expanded ? 'circuit-expanded' : ''}`} role={expanded ? 'dialog' : undefined} aria-modal={expanded || undefined} aria-label={expanded ? 'Fullscreen circuit explorer' : 'Circuit explorer'}>
     <div className="panel-heading"><div><div className="eyebrow">CIRCUIT EXPLORER</div><h2>{circuit.name}</h2></div><span className="tag"><Check size={12}/>{circuit.origin === 'synthetic' ? 'Synthetic example' : 'Approved development'}</span></div>
-    <div className="circuit-stats"><span><strong>{(circuit.num_qubits ?? 0)}</strong> qubits</span><span><strong>{total.toLocaleString()}</strong> {stepKind === 'expanded' ? 'expanded instructions' : 'source steps'}</span><span>{circuit.parse_seconds.toFixed(2)} s parse</span><span className="inspection-badge">{stepKind === 'expanded' ? 'C++ inspection · dev' : 'Python source view'}</span></div>
-    {circuit.fallback_reason ? <p className="inspection-fallback" role="status">Python fallback: {circuit.fallback_reason}</p> : null}
+    <div className="circuit-stats"><span><strong>{(circuit.num_qubits ?? 0)}</strong> qubits</span>{windowed ? <span>windowed native inspection · <strong>{total.toLocaleString()}</strong> statements</span> : <span><strong>{total.toLocaleString()}</strong> {stepKind === 'expanded' ? 'expanded instructions' : 'source steps'}</span>}<span>{circuit.parse_seconds.toFixed(2)} s parse</span><span className="inspection-badge">{windowed ? 'C++ windowed' : stepKind === 'expanded' ? 'C++ inspection · dev' : 'Python source view'}</span></div>
+    {circuit.fallback_reason ? <p className="inspection-fallback" role="status">{windowed ? 'Windowed inspection' : 'Python fallback'}: {circuit.fallback_reason}</p> : null}
     <div className="viewport-toolbar" aria-label="Circuit view controls">
       <button className="button" onClick={() => zoomAt(1 / 1.25, size.width / 2, size.height / 2)} aria-label="Zoom out"><ZoomOut size={15}/></button>
       <span className="zoom-readout" aria-live="polite">{overview ? 'Overview' : `${Math.round(camera.zoom * 100)}%`}</span>
@@ -193,6 +198,7 @@ export function CircuitExplorer({circuit, stepKind, selected, select, nearby}: {
       <button className="button" onClick={() => {setOverview(false); setCamera({x: 0, y: 0, zoom: 1});}} aria-label="Reset circuit view"><RotateCcw size={15}/></button>
       <button ref={fullscreenButton} className="button fullscreen-control" onClick={() => void toggleFullscreen()} aria-label={expanded ? 'Exit fullscreen' : 'View circuit fullscreen'}>{expanded ? <Minimize2 size={15}/> : <Maximize2 size={15}/>}<span>{expanded ? 'Exit fullscreen' : 'Fullscreen'}</span></button>
     </div>
+    {windows.length ? <div className="viewport-position window-jump"><span>Windowed native inspection · {windowSize.toLocaleString()} statements per window · only source-step navigation</span><label>Statement window<select aria-label="Statement window" value={currentWindow} onChange={e => {const w = windows[Number(e.target.value)]; if (w) select(w.start_step);}}>{windows.map((w, i) => <option key={w.index} value={i}>Statements {w.start_step.toLocaleString()}–{w.end_step.toLocaleString()}</option>)}</select></label></div> : null}
     <div ref={viewport} className="circuit-viewport" style={expanded ? undefined : {height: Math.min(440, Math.max(220, TOP + (circuit.num_qubits ?? 0) * ROW + 40))}}>
       <svg role="group" aria-label="Interactive quantum circuit" viewBox={`0 0 ${size.width} ${size.height}`} onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={e => pointers.current.delete(e.pointerId)} onPointerCancel={e => pointers.current.delete(e.pointerId)} onClickCapture={e => {if (suppressClick.current) {e.preventDefault(); e.stopPropagation();}}}>
         <title>{overview ? 'Whole circuit overview. Click a location to explore its gates.' : 'Scroll through qubits and gates, or drag to pan. Pinch or Ctrl+scroll to zoom. Select gates to inspect.'}</title>

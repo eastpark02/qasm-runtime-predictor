@@ -54,6 +54,10 @@ class DevModelService:
                 destination.write_bytes(data)
             self.binary = snapshot / 'qasm_step.exe'
             self.binary.write_bytes(binary)
+            if not sys.platform.startswith('win'):
+                # Non-Windows hosts: upstream find_binary() wants an executable named qasm_step.
+                self.binary.chmod(0o755)
+                (snapshot / 'qasm_step').symlink_to('qasm_step.exe')
             (snapshot / 'checkpoint.json').write_text(json.dumps(manifest, indent=2))
             # Every import comes from the verified session snapshot. The upstream
             # RuntimeModel itself is reused, including derive() and timeout rules.

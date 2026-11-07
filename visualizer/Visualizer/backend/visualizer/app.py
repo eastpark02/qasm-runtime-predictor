@@ -17,16 +17,17 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from .access import AccessPolicy
-from .circuits import prefix
+from .circuits import prefix, prefix_at
 from .examples import EXAMPLES
 from .model_service import ModelService
 from .dev_model import DevModelService
 from .workers import run_isolated
-from .inspector import native_parse, expanded_prefix, verified_inspector
+from .inspector import native_parse, native_index, native_window, expanded_prefix, verified_inspector, WINDOW_SIZE
 from .limits import DEFAULT_UPLOAD_BYTES, INTERACTIVE_BYTES, PYTHON_FALLBACK_BYTES, validate_upload_bytes
 
 ROOT = Path(__file__).resolve().parents[2]
 MAX_BYTES = DEFAULT_UPLOAD_BYTES
+WINDOWS_CACHED = 4  # Inspected statement windows retained per windowed circuit.
 
 
 class LRU:
@@ -211,7 +212,42 @@ def create_app(settings=None, model=None):
                 'expanded_state_boundary': p.get('expanded_state_boundary'),
                 'source_bytes': record.get('source_bytes', len(record.get('source', ''))),
                 'full_source_only': p.get('inspection_mode') == 'full_source_only',
-                'warnings': [*p.get('warnings', []), 'Prefix runtime estimates are experimental.', 'No model prediction or state calculation has been run.']}
+                'warnings': [*p.get('warnings', []), 'Prefix runtime estimates are experimental.', 'No model prediction or state calculation has been run.'],
+                **({'window_size': p['window_size'], 'windows': p['windows'], 'step_kind': 'source'} if p.get('inspection_mode') == 'windowed' else {})}
+
+    def windowed_warnings(parsed):
+        return [f"Windowed native inspection: {parsed['total_steps']:,} statements exceed the 100,000-statement interactive limit, so statements are inspected on demand in windows of {WINDOW_SIZE:,}. Only source-step navigation is available; expanded-instruction navigation is unavailable.",
+                'Features, prediction and SHAP use the exact source through the selected statement (the exact full source at the last statement). The native stepper keeps its 10,000-gate limit and state calculation keeps its 12-qubit/10,000-operation limits. Cloud execution is unavailable in windowed mode.',
+                f'A window whose {WINDOW_SIZE:,} statements expand to more than 100,000 primitive records (custom gates or register broadcasts) cannot be inspected and reports an explicit error.']
+
+    def window_rows(record, k):
+        # One inspection per window at a time per circuit; at most four
+        # inspected windows are retained per circuit.
+        with record['window_lock']:
+            rows = record['window_cache'].get(k)
+            if rows is not None:
+                return rows
+            if app.state.inspector_build is None:
+                raise HTTPException(422, 'Native inspector unavailable at server startup')
+            if not app.state.workers.acquire(blocking=False):
+                raise HTTPException(429, 'Two calculations are already running; try again shortly')
+            window = record['parsed']['windows'][k]
+            try:
+                rows = native_window(record['source'], record['parsed'], k, settings.root, app.state.inspector_build['binary_sha256'],
+                                     max_bytes=settings.max_upload_bytes)
+            except TimeoutError as exc:
+                raise HTTPException(408, f"Windowed inspection of statements {window['start_step']:,}–{window['end_step']:,} failed: {exc}") from exc
+            except (ValueError, OSError, KeyError, json.JSONDecodeError) as exc:
+                raise HTTPException(422, f"Windowed inspection of statements {window['start_step']:,}–{window['end_step']:,} failed: {type(exc).__name__}: {exc}") from exc
+            finally:
+                app.state.workers.release()
+            record['window_cache'].put(k, rows)
+            return rows
+
+    def windowed_step(record, step):
+        if not 1 <= step <= record['parsed']['total_steps']:
+            raise HTTPException(422, 'Step is outside this circuit')
+        return window_rows(record, (step - 1) // WINDOW_SIZE)[(step - 1) % WINDOW_SIZE]
 
     def register(data, name, authorized=None):
         if len(data) > settings.max_upload_bytes:
@@ -240,6 +276,14 @@ def create_app(settings=None, model=None):
                 fallback = None
             except (ValueError, TimeoutError, OSError, KeyError, json.JSONDecodeError) as exc:
                 fallback = f'{type(exc).__name__}: {exc}'
+                if isinstance(exc, ValueError) and 'Source inspection limit' in str(exc) and len(data) <= INTERACTIVE_BYTES:
+                    # Same worker slot: index every statement, inspect windows on demand.
+                    try:
+                        parsed = native_index(source, settings.root, app.state.inspector_build['binary_sha256'], max_bytes=settings.max_upload_bytes)
+                        parsed.update(fallback_reason=fallback, warnings=windowed_warnings(parsed))
+                        fallback = None
+                    except (ValueError, TimeoutError, OSError, KeyError, json.JSONDecodeError) as second:
+                        fallback += f'; windowed native index failed: {type(second).__name__}: {second}'
             finally:
                 app.state.workers.release()
             if fallback is not None:
@@ -252,6 +296,8 @@ def create_app(settings=None, model=None):
                 parsed.setdefault('warnings', []).append('SOURCE view: native expansion unavailable. ' + fallback)
             elapsed = time.perf_counter() - started
             record = {'source': source, 'source_bytes': len(data), 'input_hash': cid, 'parsed': parsed, 'origin': approved['origin'], 'name': name, 'parse_seconds': elapsed}
+            if parsed.get('inspection_mode') == 'windowed':
+                record.update(window_cache=LRU(WINDOWS_CACHED), window_lock=threading.Lock())
             app.state.circuits.put(cid, record)
         return summary(cid, record)
 
@@ -299,6 +345,16 @@ def create_app(settings=None, model=None):
             if request.step != 1 or request.step_kind != 'source':
                 raise HTTPException(422, 'Large-file mode supports only the Full circuit checkpoint (source step 1); arbitrary prefixes are unavailable')
             return record, Path(record['source_path'])
+        if record['parsed'].get('inspection_mode') == 'windowed':
+            if request.step_kind != 'source':
+                raise HTTPException(422, 'Expanded checkpoints are unavailable in windowed native inspection; select a source step')
+            total = record['parsed']['total_steps']
+            if not 0 <= request.step <= total:
+                raise HTTPException(422, 'Step is outside this circuit')
+            if request.step == total:
+                return record, record['source']  # Exact full-source featurization.
+            cutoff = windowed_step(record, request.step)['end'] if request.step else 0
+            return record, prefix_at(record['source'], record['parsed']['declarations'], cutoff)
         try:
             if request.step_kind == 'expanded':
                 source, _ = expanded_prefix(record['source'], record['parsed'], request.step)
@@ -314,8 +370,11 @@ def create_app(settings=None, model=None):
             return {'step': 1, 'step_kind': 'source', 'prefix_kind': 'original_full_source',
                     'checkpoint_label': 'Full circuit', 'input_hash': record['input_hash'],
                     'prefix_hash': record['input_hash'], 'source_origin': None}
-        records = p.get('instructions', []) if request.step_kind == 'expanded' else p['steps']
-        origin = records[request.step - 1] if request.step else None
+        if p.get('inspection_mode') == 'windowed':
+            origin = windowed_step(record, request.step) if request.step else None
+        else:
+            records = p.get('instructions', []) if request.step_kind == 'expanded' else p['steps']
+            origin = records[request.step - 1] if request.step else None
         if request.step_kind == 'expanded':
             _, kind = expanded_prefix(record['source'], p, request.step)
         else:
@@ -357,7 +416,7 @@ def create_app(settings=None, model=None):
         except (OSError, ValueError, KeyError) as exc:
             inspector = {'available': False, 'error': str(exc), 'fallback': 'python_source'}
         return {'ok': True, 'model': app.state.model.info, 'access': {'scope': 'development_only', 'approved_files': len(app.state.policy.entries), 'source': app.state.policy.source},
-                'inspection': inspector, 'limits': {'state_qubits': 12, 'state_operations': 10_000, 'inspection_operations': 100_000, 'inspection_qubits': 2048, 'nesting': 64, 'workers': 2, 'inspection_attempt_timeout_seconds': 10, 'state_timeout_seconds': settings.state_timeout, 'upload_bytes': settings.max_upload_bytes, 'interactive_bytes': INTERACTIVE_BYTES, 'python_fallback_bytes': PYTHON_FALLBACK_BYTES, 'large_feature_timeout_seconds': settings.large_feature_timeout, 'large_feature_memory_bytes': settings.large_feature_memory_bytes, 'large_feature_workers': 1, 'native_output_bytes': 64 * 1024 * 1024, 'metadata_preview_chars': 4096}}
+                'inspection': inspector, 'limits': {'state_qubits': 12, 'state_operations': 10_000, 'inspection_operations': 100_000, 'inspection_qubits': 2048, 'nesting': 64, 'workers': 2, 'inspection_attempt_timeout_seconds': 10, 'state_timeout_seconds': settings.state_timeout, 'upload_bytes': settings.max_upload_bytes, 'interactive_bytes': INTERACTIVE_BYTES, 'python_fallback_bytes': PYTHON_FALLBACK_BYTES, 'large_feature_timeout_seconds': settings.large_feature_timeout, 'large_feature_memory_bytes': settings.large_feature_memory_bytes, 'large_feature_workers': 1, 'native_output_bytes': 64 * 1024 * 1024, 'metadata_preview_chars': 4096, 'window_size': WINDOW_SIZE, 'windows_cached': WINDOWS_CACHED}}
 
     @app.get('/api/examples')
     def examples():
@@ -412,9 +471,16 @@ def create_app(settings=None, model=None):
 
     @app.get('/api/circuits/{cid}/steps')
     def steps(cid: str, offset: int = Query(0, ge=0), limit: int = Query(80, ge=1, le=200)):
-        p = circuit(cid)['parsed']
+        record = circuit(cid)
+        p = record['parsed']
         if p.get('inspection_mode') == 'full_source_only':
             raise HTTPException(422, 'Gate navigation is unavailable in large-file Full circuit mode')
+        if p.get('inspection_mode') == 'windowed':
+            # Global 1-based steps; window k covers k*WINDOW_SIZE+1 ... (k+1)*WINDOW_SIZE.
+            end, rows = min(offset + limit, p['total_steps']), []
+            for k in range(offset // WINDOW_SIZE, (end - 1) // WINDOW_SIZE + 1) if offset < end else ():
+                rows.extend(window_rows(record, k)[max(offset, k * WINDOW_SIZE) - k * WINDOW_SIZE:end - k * WINDOW_SIZE])
+            return {'offset': offset, 'total': p['total_steps'], 'steps': rows}
         return {'offset': offset, 'total': p['total_steps'], 'steps': p['steps'][offset:offset + limit]}
 
     @app.get('/api/circuits/{cid}/instructions')
@@ -423,6 +489,8 @@ def create_app(settings=None, model=None):
         p = record['parsed']
         if p.get('inspection_mode') == 'full_source_only':
             raise HTTPException(422, 'Instruction navigation is unavailable in large-file Full circuit mode')
+        if p.get('inspection_mode') == 'windowed':
+            raise HTTPException(422, 'Expanded instruction navigation is unavailable in windowed native inspection; use source steps (/steps)')
         rows = p.get('instructions', p['steps'])
         return {'offset': offset, 'total': len(rows), 'steps': rows[offset:offset + limit],
                 'step_kind': 'expanded' if 'instructions' in p else 'source', 'provenance': provenance(record)}
@@ -433,6 +501,14 @@ def create_app(settings=None, model=None):
         p = record['parsed']
         if p.get('inspection_mode') == 'full_source_only':
             raise HTTPException(422, 'Diagram overview is unavailable in large-file Full circuit mode')
+        if p.get('inspection_mode') == 'windowed':
+            # Statement counts per equal-width bucket, from the native index total
+            # (the index's bucket_counts are this arithmetic at buckets=200).
+            total = p['total_steps']
+            width = max(1, (total + buckets - 1) // buckets)
+            return {'total': total, 'step_kind': 'source',
+                    'buckets': [{'start': start + 1, 'end': min(start + width, total), 'count': min(width, total - start)}
+                                for start in range(0, total, width)], 'provenance': provenance(record)}
         rows = p.get('instructions', p['steps'])
         width = max(1, (len(rows) + buckets - 1) // buckets)
         return {'total': len(rows), 'step_kind': 'expanded' if 'instructions' in p else 'source',
@@ -481,8 +557,12 @@ def create_app(settings=None, model=None):
                 diagnostics.append('Native pass incomplete or fallback used; prediction preserves upstream features. Native trace is unavailable.')
             if values.get('st_n_skipped_stmts') or values.get('st_n_param_parse_err') or values.get('st_n_unknown_gates'):
                 diagnostics.append('Native parser reports skipped statements, parameter errors, or unknown gates; inspect the st_* counters. Features preserved unchanged.')
-            source_steps = (record['parsed'].get('instructions', []) if request.step_kind == 'expanded' else record['parsed']['steps'])[:request.step]
-            imported = sum(step['instances'] for step in source_steps)
+            if record['parsed'].get('inspection_mode') == 'windowed':
+                # Global instance count through the selected statement (index offsets).
+                imported = windowed_step(record, request.step)['op_end'] if request.step else 0
+            else:
+                source_steps = (record['parsed'].get('instructions', []) if request.step_kind == 'expanded' else record['parsed']['steps'])[:request.step]
+                imported = sum(step['instances'] for step in source_steps)
             if not isinstance(source, Path) and 'st_n_gates' in values and imported != values['st_n_gates']:
                 diagnostics.append(f"Source/imported instruction count {imported} differs from native expanded gate count {values['st_n_gates']}. Custom calls expand; measurement, reset and barriers have separate counters. Features preserved unchanged.")
             result = {'features': values, 'raw_features': values, 'diagnostics': diagnostics,

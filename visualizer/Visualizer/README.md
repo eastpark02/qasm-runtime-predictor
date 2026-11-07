@@ -141,6 +141,15 @@ at 64 MiB. Source/body previews are bounded to 4,096 characters; exact source an
 offsets still determine prefixes and model inputs. The viewport pages instructions
 and renders visible gates. Python SOURCE fallback is limited to 5 MiB.
 
+Files up to 32 MiB with more than 100,000 top-level statements open in
+**windowed native inspection** (`inspection_mode=windowed`). The C++ inspector
+indexes every statement once, then inspects windows of 100,000 statements on
+demand (at most four retained per circuit). Only source-step navigation is
+available; features, prediction and SHAP use the exact source through the
+selected statement. Stepper, state (12 qubits/10,000 operations) and window
+record limits (100,000 expanded records) are unchanged, and cloud execution is
+unavailable. See [windowed inspection](BACKEND-MODEL.md#windowed-native-inspection).
+
 Files above 32 MiB, and files above 5 MiB whose interactive inspection fails,
 open in **Full circuit mode**. The original file is retained on disk; it does not
 enter Python statement parsing or Qiskit. Syntax and qubit/gate counts are

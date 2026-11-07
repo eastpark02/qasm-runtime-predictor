@@ -198,6 +198,40 @@ retains the twelve-qubit limit. Loops, standalone else, modifiers, calibration,
 external includes and unsupported declarations remain explicit errors. Upload
 hash authorization is still required before any parsing and every computation.
 
+## Windowed native inspection
+
+When whole-file native inspection fails only because a source of at most 32 MiB
+has more than 100,000 top-level statements, upload runs
+`qasm_inspect --index file [max_bytes]` in the same worker slot with the same
+10-second deadline. It parses the header, declarations and gate definitions as
+usual, parses (but does not expand or store) every call, and enforces the qubit
+and register caps and declarations-before-calls. It reports `total_statements`,
+`window_offsets` (absolute byte offset of every 100,000th statement),
+`window_op_offsets`, `bucket_counts`, `state_boundary` and `has_definitions`.
+If indexing fails, the previous fallback chain is unchanged.
+
+The record has `inspection_mode=windowed`, `inspection_backend=app_owned_cpp_windowed`,
+`total_instructions=null`, `step_kind=source`, `window_size=100000` and
+`windows=[{index,start_step,end_step,byte_offset}]`; `fallback_reason` keeps the
+original limit message. `/steps?offset&limit` resolves global 1-based steps to
+windows server-side and runs `qasm_inspect --window file offset base_step count`
+on demand. A window re-reads declarations, seeks to the statement offset and
+expands exactly `count` calls with global `source_step` numbers and absolute
+offsets; the same Python alignment as whole-file inspection produces the step
+records. Global `op_start/op_end` come from the index; `expanded_start/end` are
+`null`. Four inspected windows are retained per circuit; one window inspection
+per circuit runs at a time and uses one of the two calculation workers (429 when
+both are busy). The 100,000-record and 64 MiB output caps still apply inside a
+window, so a window whose custom calls or broadcasts expand past 100,000 records
+returns an explicit 422.
+
+`/instructions` and `step_kind=expanded` checkpoints return 422. `/overview`
+derives statement buckets from the index total. Source step N uses the exact
+source through statement N, built by the same prefix code as other modes;
+step `total_steps` is the exact original source. Stepper (10,000 gates), state
+(12 qubits/10,000 operations) and authorization rechecks are unchanged; cloud
+execution is rejected. Health `limits` reports `window_size` and `windows_cached`.
+
 ## Large uploads and exact full-source inference
 
 The byte ceiling is independent of interactive operation limits. The default

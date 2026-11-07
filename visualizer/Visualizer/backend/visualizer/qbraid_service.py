@@ -195,6 +195,8 @@ def preflight_program(record, step, step_kind='source', scope='checkpoint', ackn
     parsed = record['parsed']
     if parsed.get('inspection_mode') == 'full_source_only':
         raise CloudError('Cloud execution is unavailable in large-file Full circuit mode; this source has not been inspected.')
+    if parsed.get('inspection_mode') == 'windowed':
+        raise CloudError('Cloud execution is unavailable in windowed native inspection; this source exceeds the 100,000-statement interactive limit.')
     if scope not in {'full', 'checkpoint'} or step_kind not in {'source', 'expanded'}:
         raise CloudError('Unknown execution scope or checkpoint kind.')
     if not 1 <= parsed['num_qubits'] <= 2048:
