@@ -1,0 +1,6 @@
+{
+  "profiles": [
+    {"id": "primary", "label": "Personal qBraid", "api_key_env": "QUANTUM_QBRAID_PRIMARY_KEY"},
+    {"id": "research", "label": "Research qBraid", "api_key_env": "QUANTUM_QBRAID_RESEARCH_KEY"}
+  ]
+}

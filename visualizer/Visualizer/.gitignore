@@ -1,0 +1,13 @@
+.venv/
+.local/
+__pycache__/
+.pytest_cache/
+*.egg-info/
+frontend/node_modules/
+frontend/dist/
+frontend/test-results/
+frontend/playwright-report/
+*.log
+qbraid-profiles.json
+.env
+.env.*
