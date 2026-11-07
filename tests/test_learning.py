@@ -6,7 +6,9 @@ import joblib
 import numpy as np
 
 from runtime_pipeline.learning import fit_model
-from runtime_pipeline.model import RuntimeModel
+from model import RuntimeModel
+from runtime_pipeline.model import RuntimeModel as PipelineRuntimeModel
+from runtime_pipeline.parser import featurize
 
 
 class LearningTests(unittest.TestCase):
@@ -15,29 +17,126 @@ class LearningTests(unittest.TestCase):
         self.thresholds = [16 if i % 2 else 64 for i in range(40)]
         self.targets = [float(i * i + 1) for i in range(40)]
 
-    def test_median_thresholds_and_unseen_fallback(self):
-        model = fit_model(self.features, self.thresholds, self.targets, 42, {"kind": "median"})
-        predicted = model.predict([{}] * 3, [16, 64, 1024])
-        self.assertAlmostEqual(predicted[2], np.median(self.targets))
-        self.assertAlmostEqual(predicted[0], np.median(np.array(self.targets)[np.array(self.thresholds) == 16]))
-
-    def test_trees_serialization_and_harness_contract(self):
-        model = fit_model(self.features, self.thresholds, self.targets, 42,
-                          {"kind": "extra_trees", "n_estimators": 12, "n_jobs": 1})
-        predicted = model.predict(self.features, self.thresholds)
+    def assert_bounded_predictions(self, predicted, count):
+        self.assertEqual(predicted.shape, (count,))
+        self.assertTrue(np.issubdtype(predicted.dtype, np.floating))
         self.assertTrue(np.all(np.isfinite(predicted)))
-        self.assertTrue(np.all((predicted > 0) & (predicted <= 21600)))
-        with tempfile.TemporaryDirectory(dir=Path.cwd()) as tmp:
-            joblib.dump(model, Path(tmp) / "model.joblib")
-            adapter = RuntimeModel(tmp)
-            features = adapter.featurize("OPENQASM 3.0; qubit a; h a;")
-            self.assertIsInstance(adapter.predict(features, 16), float)
+        self.assertTrue(np.all((predicted >= 1e-9) & (predicted <= 21600)))
 
-    def test_learning_vocabulary_is_training_fold_local(self):
-        model = fit_model([{"a": 1}, {"a": 2}], [16, 16], [1, 2], 42,
-                          {"kind": "extra_trees", "n_estimators": 3, "n_jobs": 1})
-        model.predict([{"a": 100, "validation_only": 1}], [16])
-        self.assertNotIn("validation_only", model.model.named_steps["vectorizer"].vocabulary_)
+    def test_median_clips_before_aggregation_and_unseen_fallback(self):
+        model = fit_model(
+            [{"n_ops": i + 1} for i in range(6)], [16, 16, 64, 64, 256, 256],
+            [1e-12, 1e-11, 1.0, 43200.0, 86400.0, 216000.0], 42, {"kind": "median"},
+        )
+        self.assertEqual(model.medians, {16.0: 1e-9, 64.0: 10800.5, 256.0: 21600.0})
+        self.assertEqual(model.global_median, 10800.5)
+        fitted_state = joblib.hash(model)
+        thresholds = [256, 1024, 16, 64]
+        expected = [21600.0, 10800.5, 1e-9, 10800.5]
+        for rows in ([{}] * 4, [{"n_ops": 1e20, "held_out_only": i} for i in range(4)]):
+            predicted = model.predict(rows, thresholds)
+            self.assert_bounded_predictions(predicted, 4)
+            np.testing.assert_array_equal(predicted, expected)
+        self.assertEqual(joblib.hash(model), fitted_state)
+
+    def test_serialization_and_root_harness_contract(self):
+        self.assertIs(RuntimeModel, PipelineRuntimeModel)
+        qasm = "OPENQASM 3.0; qubit a; h a;"
+        features = featurize(qasm_text=qasm)
+        self.assertIsInstance(features, dict)
+        self.assertTrue(all(isinstance(value, (int, float, np.number)) for value in features.values()))
+        rows = [features, {}, {"n_ops": float("nan"), "held_out_only": 3.0}]
+        thresholds = [16, 1024, 64]
+        for config in ({"kind": "median"}, {"kind": "extra_trees", "n_estimators": 12, "n_jobs": 1}):
+            with self.subTest(kind=config["kind"]):
+                model = fit_model(self.features, self.thresholds, self.targets, 42, config)
+                predicted = model.predict(feature_rows=rows, thresholds=thresholds)
+                self.assert_bounded_predictions(predicted, len(rows))
+                with tempfile.TemporaryDirectory(dir=Path.cwd()) as tmp:
+                    with self.assertRaises(FileNotFoundError):
+                        RuntimeModel(artifacts_dir=tmp)
+                    artifact = Path(tmp) / "model.joblib"
+                    joblib.dump(model, artifact)
+                    restored = joblib.load(artifact)
+                    np.testing.assert_allclose(restored.predict(rows, thresholds), predicted, rtol=1e-12, atol=0)
+                    adapter = RuntimeModel(artifacts_dir=tmp)
+                    self.assertEqual(adapter.featurize(qasm_text=qasm), features)
+                    for row, threshold, expected in zip(rows, thresholds, predicted):
+                        actual = adapter.predict(features=row, threshold=threshold)
+                        self.assertIsInstance(actual, float)
+                        np.testing.assert_allclose(actual, expected, rtol=1e-12, atol=0)
+
+    def test_training_preprocessing_and_estimator_state_are_fold_local(self):
+        rows = [
+            {"n_ops": 1.0, "depth_proxy": 1.0, "sample_mean_degree": float("nan")},
+            {"n_ops": 3.0, "depth_proxy": float("nan"), "sample_mean_degree": float("inf")},
+            {"n_ops": 5.0, "depth_proxy": 9.0, "sample_mean_degree": float("-inf")},
+            {"n_ops": 7.0, "depth_proxy": float("inf"), "sample_mean_degree": float("nan")},
+            {"n_ops": 99.0, "depth_proxy": 101.0, "sample_mean_degree": float("nan")},
+        ]
+        thresholds = [16, 16, 16, 64, 64]
+        expected_statistics = {
+            "n_ops": 5.0, "depth_proxy": 9.0, "sample_mean_degree": 0.0,
+            "threshold": 16.0, "log2_threshold": 4.0,
+        }
+        config = {"kind": "extra_trees", "n_estimators": 400, "min_samples_leaf": 2,
+                  "max_features": 1.0, "n_jobs": 4}
+        for seed in (42, 43):
+            with self.subTest(seed=seed):
+                model = fit_model(feature_rows=rows, thresholds=thresholds,
+                                  targets_s=[1.0, 4.0, 9.0, 16.0, 25.0], seed=seed, config=config)
+                vectorizer = model.model.named_steps["vectorizer"]
+                imputer = model.model.named_steps["imputer"]
+                regressor = model.model.named_steps["regressor"]
+                self.assertEqual(set(vectorizer.vocabulary_), set(expected_statistics))
+                self.assertEqual(dict(zip(vectorizer.get_feature_names_out(), imputer.statistics_)),
+                                 expected_statistics)
+                self.assertEqual(regressor.random_state, seed)
+                for name in ("n_estimators", "min_samples_leaf", "max_features", "n_jobs"):
+                    self.assertEqual(getattr(regressor, name), config[name])
+                self.assertEqual(len(regressor.estimators_), 400)
+                self.assertEqual(model.medians, {16.0: 4.0, 64.0: 20.5})
+                self.assertEqual(model.global_median, 9.0)
+                # Hash the entire fitted object, including learned tree arrays and preprocessing.
+                fitted_state = joblib.hash(model)
+                training_predictions = model.predict(rows, thresholds)
+                held_out = [
+                    {"n_ops": 1e20, "depth_proxy": 1e20, "sample_mean_degree": 1e20,
+                     "held_out_only": 1e20},
+                    {},
+                    {"n_ops": float("nan"), "depth_proxy": float("-inf")},
+                ]
+                predicted = model.predict(held_out, [16, 1024, 4096])
+                self.assert_bounded_predictions(predicted, len(held_out))
+                np.testing.assert_allclose(model.predict(rows, thresholds), training_predictions,
+                                           rtol=1e-12, atol=0)
+                self.assertEqual(joblib.hash(model), fitted_state)
+
+    def test_trees_fit_log10_of_clipped_seconds(self):
+        # With two samples and leaf size two, the leaf predicts their mean log runtime.
+        cases = [
+            ([1e-12, 1e-11], 1e-9),
+            ([1e-12, 216000.0], np.sqrt(1e-9 * 21600.0)),
+            ([43200.0, 216000.0], 21600.0),
+        ]
+        for targets, expected in cases:
+            with self.subTest(targets=targets):
+                model = fit_model([{"n_ops": 1}, {"n_ops": 2}], [16, 16], targets, 42,
+                                  {"kind": "extra_trees", "n_estimators": 3,
+                                   "min_samples_leaf": 2, "n_jobs": 1})
+                predicted = model.predict([{}, {"n_ops": 1e20}], [16, 1024])
+                self.assert_bounded_predictions(predicted, 2)
+                np.testing.assert_allclose(predicted, [expected, expected], rtol=1e-12, atol=0)
+
+    def test_prediction_counts_and_alignment(self):
+        for config in ({"kind": "median"}, {"kind": "extra_trees", "n_estimators": 3, "n_jobs": 1}):
+            with self.subTest(kind=config["kind"]):
+                model = fit_model(self.features, self.thresholds, self.targets, 42, config)
+                self.assert_bounded_predictions(model.predict([], []), 0)
+                self.assert_bounded_predictions(model.predict(self.features, self.thresholds), 40)
+                for rows, thresholds in (([], [16]), ([{}], []), ([{}, {}], [16]), ([{}], [16, 64])):
+                    with self.subTest(rows=rows, thresholds=thresholds), self.assertRaises(ValueError):
+                        model.predict(rows, thresholds)
 
     def test_identity_and_invalid_targets_rejected(self):
         with self.assertRaises(ValueError):
