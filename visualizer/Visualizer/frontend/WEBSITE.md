@@ -6,6 +6,14 @@ external font request, deployment, or browser-side QASM simulation was added.
 
 ## Controls
 
+- The footer's **Allow unlisted uploads** switch (`role=switch` checkbox,
+  keyboard operable, off by default) reflects `health.access.allow_unlisted`. A
+  change POSTs `/api/access` and reloads `/api/health`. When on, the header badge
+  reads **Unlisted uploads allowed** with a warning shield, the source bar reads
+  **Any UTF-8 .qasm file (unlisted uploads allowed)**, the welcome guard says
+  audit exclusion is not guaranteed, and unlisted circuits carry an **Unlisted
+  upload** tag. When off, everything renders as before; an unlisted circuit still
+  on screen gets the backend's revocation error on its next action.
 - The header's sun/moon button toggles dark mode. Dark is the default; the choice
   is persisted in local storage and applied before the first paint. Circuit and
   Bloch-sphere graphics follow the selected theme.

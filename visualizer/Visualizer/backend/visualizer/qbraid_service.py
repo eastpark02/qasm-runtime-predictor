@@ -193,6 +193,9 @@ def device_summary(raw):
 
 def preflight_program(record, step, step_kind='source', scope='checkpoint', acknowledge_initial_state=False):
     parsed = record['parsed']
+    if record.get('origin') == 'unlisted':
+        # Unvetted content could be an audit circuit; never send it to a third-party provider.
+        raise CloudError('Cloud execution is refused for unlisted uploads: this file is not on the development allowlist, so audit exclusion is not guaranteed and it is never sent to a provider.', 403)
     if parsed.get('inspection_mode') == 'full_source_only':
         raise CloudError('Cloud execution is unavailable in large-file Full circuit mode; this source has not been inspected.')
     if parsed.get('inspection_mode') == 'windowed':

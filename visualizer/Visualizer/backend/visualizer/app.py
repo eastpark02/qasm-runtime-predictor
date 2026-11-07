@@ -14,9 +14,9 @@ from typing import Literal
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StrictBool
 
-from .access import AccessPolicy
+from .access import AccessPolicy, UNLISTED_WARNING, parse_flag
 from .circuits import prefix, prefix_at
 from .examples import EXAMPLES
 from .model_service import ModelService
@@ -72,6 +72,8 @@ class Settings:
     max_upload_bytes: int = field(default_factory=lambda: int(os.environ.get('VISUALIZER_MAX_UPLOAD_BYTES', DEFAULT_UPLOAD_BYTES)))
     large_feature_timeout: float = field(default_factory=lambda: float(os.environ.get('VISUALIZER_LARGE_FEATURE_TIMEOUT', '180')))
     large_feature_memory_bytes: int = field(default_factory=lambda: int(os.environ.get('VISUALIZER_LARGE_FEATURE_MEMORY_BYTES', str(3 * 1024 ** 3))))
+    # Initial state of the runtime switch; off by default (1/true/yes/on enables).
+    allow_unlisted_uploads: bool = field(default_factory=lambda: os.environ.get('VISUALIZER_ALLOW_UNLISTED_UPLOADS', ''))
 
     def __post_init__(self):
         validate_upload_bytes(self.max_upload_bytes)
@@ -79,6 +81,7 @@ class Settings:
             raise ValueError('VISUALIZER_LARGE_FEATURE_TIMEOUT must be between 1 and 600 seconds')
         if isinstance(self.large_feature_memory_bytes, bool) or not isinstance(self.large_feature_memory_bytes, int) or not 256 * 1024 ** 2 <= self.large_feature_memory_bytes <= 8 * 1024 ** 3:
             raise ValueError('VISUALIZER_LARGE_FEATURE_MEMORY_BYTES must be an integer from 268435456 through 8589934592')
+        self.allow_unlisted_uploads = parse_flag(self.allow_unlisted_uploads)
 
 
 class Checkpoint(BaseModel):
@@ -86,6 +89,11 @@ class Checkpoint(BaseModel):
     step_kind: Literal['source', 'expanded'] = 'source'
     threshold: int = Field(default=256, ge=1, le=1_048_576)
     pair: tuple[int, int] = (0, 1)
+
+
+class AccessToggle(BaseModel):
+    model_config = {'extra': 'forbid'}
+    allow_unlisted: StrictBool
 
 
 class StateCheckpoint(Checkpoint):
@@ -101,7 +109,7 @@ def create_app(settings=None, model=None):
     @asynccontextmanager
     async def lifespan(application):
         local = settings.root / '.local'
-        application.state.policy = AccessPolicy(settings.root / 'approved-development.json')
+        application.state.policy = AccessPolicy(settings.root / 'approved-development.json', allow_unlisted=settings.allow_unlisted_uploads)
         if settings.model_provider not in {'dev', 'legacy'}:
             raise ValueError('VISUALIZER_MODEL must be dev or legacy')
         application.state.model = model or (DevModelService(settings.predictor, local, settings.root / 'runtime-checkpoint.json')
@@ -157,13 +165,28 @@ def create_app(settings=None, model=None):
         response.headers['X-Content-Type-Options'] = 'nosniff'
         return response
 
+    REVOKED = 'Unlisted uploads are now off: this circuit is not on the development allowlist, so access to it was revoked. Turn the switch back on or open an approved file.'
+
+    def cache_authorized(cid, record):
+        # Re-check just before caching: the switch may have been turned off while parsing.
+        try:
+            app.state.policy.authorize_digest(cid)
+        except PermissionError as exc:
+            raise HTTPException(403, REVOKED if record['origin'] == 'unlisted' else str(exc)) from exc
+        app.state.circuits.put(cid, record)
+
     def circuit(cid):
         record = app.state.circuits.get(cid)
         if record is None:
             raise HTTPException(404, 'Circuit expired from the bounded session cache; upload or open it again')
         # Authorization is checked again at every computational entry point.
         try:
-            app.state.policy.authorize_digest(cid)
+            try:
+                app.state.policy.authorize_digest(cid)
+            except PermissionError:
+                if record.get('origin') == 'unlisted':
+                    raise PermissionError(REVOKED) from None
+                raise
             if record.get('source_path'):
                 with Path(record['source_path']).open('rb') as stored:
                     if hashlib.file_digest(stored, 'sha256').hexdigest() != cid:
@@ -223,7 +246,7 @@ def create_app(settings=None, model=None):
                 'expanded_state_boundary': p.get('expanded_state_boundary'),
                 'source_bytes': record.get('source_bytes', len(record.get('source', ''))),
                 'full_source_only': p.get('inspection_mode') == 'full_source_only',
-                'warnings': [*p.get('warnings', []), 'Prefix runtime estimates are experimental.', 'No model prediction or state calculation has been run.'],
+                'warnings': [*([UNLISTED_WARNING] if record['origin'] == 'unlisted' else []), *p.get('warnings', []), 'Prefix runtime estimates are experimental.', 'No model prediction or state calculation has been run.'],
                 **({'window_size': p['window_size'], 'windows': p['windows'], 'step_kind': 'source'} if p.get('inspection_mode') == 'windowed' else {})}
 
     def windowed_warnings(parsed):
@@ -309,8 +332,9 @@ def create_app(settings=None, model=None):
             record = {'source': source, 'source_bytes': len(data), 'input_hash': cid, 'parsed': parsed, 'origin': approved['origin'], 'name': name, 'parse_seconds': elapsed}
             if parsed.get('inspection_mode') == 'windowed':
                 record.update(window_cache=LRU(WINDOWS_CACHED), window_lock=threading.Lock())
-            app.state.circuits.put(cid, record)
-        return summary(cid, record)
+            cache_authorized(cid, record)
+            return summary(cid, record)
+        return summary(cid, circuit(cid))
 
     def register_file(path, size, name, authorized):
         cid, approved = authorized
@@ -347,7 +371,7 @@ def create_app(settings=None, model=None):
                                *(['Interactive inspection failed: ' + fallback_reason] if fallback_reason else ['File exceeds the 32 MiB interactive inspection budget.'])]}
         record = {'source_path': str(path), 'source_bytes': size, 'input_hash': cid, 'parsed': parsed,
                   'origin': approved['origin'], 'name': name, 'parse_seconds': 0}
-        app.state.circuits.put(cid, record)
+        cache_authorized(cid, record)
         return summary(cid, record)
 
     def selected(cid, request):
@@ -417,6 +441,25 @@ def create_app(settings=None, model=None):
         if thresholds is not None and request.threshold not in thresholds:
             raise HTTPException(422, f'This checkpoint supports simulator thresholds {thresholds}')
 
+    def access_status():
+        policy = app.state.policy
+        return {'scope': policy.scope, 'allow_unlisted': policy.allow_unlisted, 'default_from_env': settings.allow_unlisted_uploads,
+                'approved_files': len(policy.entries), 'source': policy.source,
+                'note': ('Unlisted uploads are ON (the switch is off by default): files not on the development allowlist are accepted and labelled unlisted, so audit exclusion is not guaranteed for them. Cloud execution stays refused for unlisted circuits.'
+                         if policy.allow_unlisted else
+                         'Unlisted uploads are OFF (the default; VISUALIZER_ALLOW_UNLISTED_UPLOADS=1 or the footer switch enables them). Only approved development/synthetic file contents are accepted. Turning the switch off revokes unlisted circuits already open. The allowlist file is never modified.')}
+
+    @app.get('/api/access')
+    def access():
+        return access_status()
+
+    @app.post('/api/access')
+    def set_access(request: AccessToggle):
+        # Loopback-only app; the origin middleware still refuses cross-origin POSTs.
+        # Turning it off revokes unlisted circuits: circuit(cid) re-authorizes every call.
+        app.state.policy.allow_unlisted = request.allow_unlisted
+        return access_status()
+
     @app.get('/api/health')
     def health():
         try:
@@ -426,7 +469,7 @@ def create_app(settings=None, model=None):
             inspector = {'available': True, 'backend': 'app_owned_cpp', 'fingerprint': build['binary_sha256'], 'upstream_commit': build['commit']}
         except (OSError, ValueError, KeyError) as exc:
             inspector = {'available': False, 'error': str(exc), 'fallback': 'python_source'}
-        return {'ok': True, 'model': app.state.model.info, 'access': {'scope': 'development_only', 'approved_files': len(app.state.policy.entries), 'source': app.state.policy.source},
+        return {'ok': True, 'model': app.state.model.info, 'access': access_status(),
                 'inspection': inspector, 'limits': {'statevector_qubits': STATE_VECTOR_QUBITS, 'state_stabilizer_qubits': STATE_STABILIZER_QUBITS, 'state_mps_qubits': STATE_MPS_QUBITS, 'state_joint_qubits': STATE_JOINT_QUBITS, 'state_operations': STATE_OPERATIONS, 'state_memory_bytes': STATE_MEMORY_BYTES, 'state_workers': 1, 'inspection_operations': 100_000, 'inspection_qubits': 2048, 'nesting': 64, 'workers': 2, 'inspection_attempt_timeout_seconds': 10, 'state_timeout_seconds': settings.state_timeout, 'upload_bytes': settings.max_upload_bytes, 'interactive_bytes': INTERACTIVE_BYTES, 'python_fallback_bytes': PYTHON_FALLBACK_BYTES, 'large_feature_timeout_seconds': settings.large_feature_timeout, 'large_feature_memory_bytes': settings.large_feature_memory_bytes, 'large_feature_workers': 1, 'native_output_bytes': 64 * 1024 * 1024, 'metadata_preview_chars': 4096, 'window_size': WINDOW_SIZE, 'windows_cached': WINDOWS_CACHED}}
 
     @app.get('/api/examples')

@@ -142,6 +142,18 @@ threshold; four traces are retained. Error status is 422 for unsupported inputs,
 408 for timeout, 429 when the two-worker limit is occupied, and 403 if input
 authorization is absent or revoked.
 
+`GET /api/access` returns `{scope, allow_unlisted, default_from_env,
+approved_files, source, note}`; `POST /api/access {"allow_unlisted": bool}`
+(strict boolean, no other keys, same loopback/origin checks as other POSTs) flips
+the unlisted-upload switch and returns the same object. It is **off by default**;
+`VISUALIZER_ALLOW_UNLISTED_UPLOADS=1|true|yes|on` turns it on at startup. While on,
+`scope` is `unrestricted` and unknown content is accepted as `origin: "unlisted"`
+with the warning `Unlisted upload: this file is not on the development allowlist,
+so audit exclusion is not guaranteed for it.` first in `warnings`. Unlisted
+circuits get 403 from qBraid quote/submit preparation. The allowlist file is
+never modified. Turning the switch off revokes unlisted circuits: the per-call
+re-authorization returns 403 before any cached result is read.
+
 Native bonds and costs are **structural workload heuristics**, not Qiskit state
 or entanglement measurements. `bond_before`/`bond_after` are log2 bond-dimension
 heuristics at the first affected cut, with zero for one-qubit gates. Thresholds

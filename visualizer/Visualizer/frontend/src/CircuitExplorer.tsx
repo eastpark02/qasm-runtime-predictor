@@ -1,6 +1,6 @@
 import {useCallback, useEffect, useRef, useState} from 'react';
 import type {PointerEvent as ReactPointerEvent} from 'react';
-import {ArrowLeft, ArrowRight, Check, Focus, Maximize2, Minimize2, RotateCcw, Scan, ZoomIn, ZoomOut} from 'lucide-react';
+import {ArrowLeft, ArrowRight, Check, Focus, ShieldAlert, Maximize2, Minimize2, RotateCcw, Scan, ZoomIn, ZoomOut} from 'lucide-react';
 import {api} from './api';
 import {totalFor} from './types';
 import type {Circuit, Step, StepKind, StatementWindow} from './types';
@@ -186,7 +186,7 @@ export function CircuitExplorer({circuit, stepKind, selected, select, nearby}: {
   const wires = Array.from({length: Math.min((circuit.num_qubits ?? 0) - firstWire, Math.ceil((size.height - TOP) / camera.zoom / ROW) + 1)}, (_, i) => firstWire + i);
   const displayed = visible.filter(s => s.step > first && s.step <= last);
   return <section id="circuit-checkpoint" tabIndex={-1} ref={panel} className={`panel circuit-panel circuit-explorer ${expanded ? 'circuit-expanded' : ''}`} role={expanded ? 'dialog' : undefined} aria-modal={expanded || undefined} aria-label={expanded ? 'Fullscreen circuit explorer' : 'Circuit explorer'}>
-    <div className="panel-heading"><div><div className="eyebrow">CIRCUIT EXPLORER</div><h2>{circuit.name}</h2></div><span className="tag"><Check size={12}/>{circuit.origin === 'synthetic' ? 'Synthetic example' : 'Approved development'}</span></div>
+    <div className="panel-heading"><div><div className="eyebrow">CIRCUIT EXPLORER</div><h2>{circuit.name}</h2></div>{circuit.origin === 'unlisted' ? <span className="tag tag-warn" title={circuit.warnings?.[0]}><ShieldAlert size={12}/>Unlisted upload</span> : <span className="tag"><Check size={12}/>{circuit.origin === 'synthetic' ? 'Synthetic example' : 'Approved development'}</span>}</div>
     <div className="circuit-stats"><span><strong>{(circuit.num_qubits ?? 0)}</strong> qubits</span>{windowed ? <span>windowed native inspection · <strong>{total.toLocaleString()}</strong> statements</span> : <span><strong>{total.toLocaleString()}</strong> {stepKind === 'expanded' ? 'expanded instructions' : 'source steps'}</span>}<span>{circuit.parse_seconds.toFixed(2)} s parse</span><span className="inspection-badge">{windowed ? 'C++ windowed' : stepKind === 'expanded' ? 'C++ inspection · dev' : 'Python source view'}</span></div>
     {circuit.fallback_reason ? <p className="inspection-fallback" role="status">{windowed ? 'Windowed inspection' : 'Python fallback'}: {circuit.fallback_reason}</p> : null}
     <div className="viewport-toolbar" aria-label="Circuit view controls">

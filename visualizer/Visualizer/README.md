@@ -61,6 +61,22 @@ button or API to approve unknown files. Do not add hashes until the input has
 explicitly been confirmed non-audit. Do not add audit data to this application.
 Only decompressed `.qasm` uploads are accepted; upload limits apply to raw bytes.
 
+**Unlisted-upload switch (off by default).** `VISUALIZER_ALLOW_UNLISTED_UPLOADS`
+(`1`/`true`/`yes`/`on`; empty, `0`, `false`, `no` or `off` keep it off; anything
+else stops startup) sets the initial state, and the footer's **Allow unlisted
+uploads** switch (`POST /api/access {"allow_unlisted": true|false}`) flips it at
+runtime. While on, it disables the 403 for content that is not on the allowlist:
+any UTF-8 `.qasm` is accepted with `origin: "unlisted"` and a first warning that
+audit exclusion is not guaranteed for it. The header, source bar and welcome text
+switch to a warning state. Unlisted circuits are always refused for qBraid cloud
+execution, so unvetted content is never sent to a provider. The switch approves
+nothing: `approved-development.json` and the in-memory allowlist are never
+modified. Turning it off revokes unlisted circuits already open: every circuit
+call is re-authorized, so they get 403 (cached results are not served) and a
+fresh unlisted upload gets 403 again. `/api/health` and `GET /api/access` report
+`scope` (`development_only` or `unrestricted`), `allow_unlisted` and
+`default_from_env`. Do not turn it on for audit circuits.
+
 ## Runtime checkpoint
 
 Default provider: the pinned `qasm-runtime-predictor` **dev** commit
