@@ -7,6 +7,7 @@
 // Portable C++20 (MSVC, MinGW, gcc, clang). No POSIX, no compiler-specific code.
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -809,6 +810,17 @@ struct Stepper {
   uint64_t n_ent = 0, n_noop_classical = 0, n_noop_identity = 0;
   uint64_t n_unknown = 0;
   bool truncated = false;
+  // --deadline: wall-clock stop (steady_clock), checked every 4096 primitives / cut updates
+  bool deadline_on = false;
+  bool deadline_hit = false;
+  std::chrono::steady_clock::time_point deadline{};
+  bool past_deadline() {
+    if (deadline_on && std::chrono::steady_clock::now() > deadline) {
+      deadline_hit = true;
+      truncated = true;
+    }
+    return deadline_hit;
+  }
   std::vector<double> samples;     // cost_1024 after gate sidx[i]
   std::vector<uint64_t> sidx;
   uint64_t samp_iv = 1;            // sampling interval, doubles when 256 samples are held
@@ -882,7 +894,14 @@ struct Stepper {
   void entangle_span(int a, int b, int r) {
     int lo = std::min(a, b), hi = std::max(a, b);
     std::fill(epmax.begin(), epmax.end(), 0.0);
-    for (int k = lo; k < hi; ++k) update_cut(k, r);
+    if (deadline_on && hi - lo >= 4096) {
+      for (int k = lo; k < hi; ++k) {
+        update_cut(k, r);
+        if ((n_ent & 4095) == 0 && past_deadline()) break;
+      }
+    } else {
+      for (int k = lo; k < hi; ++k) update_cut(k, r);
+    }
     for (size_t t = 0; t < thr.size(); ++t) cost_ep[t] += epmax[t];
     span_sum += hi - lo;
     ++n_edges;
@@ -1092,6 +1111,7 @@ struct Stepper {
       truncated = true;
       return;
     }
+    if (deadline_on && (n_gates & 4095) == 0 && past_deadline()) return;
     ++n_gates;
     gate_since_snapshot = true;
     if (k == 1) ++n_1q;
@@ -1804,6 +1824,8 @@ struct Parser {
       fresh.n_measure = st.n_measure; fresh.n_reset = st.n_reset; fresh.n_ent = st.n_ent;
       fresh.n_noop_classical = st.n_noop_classical; fresh.n_noop_identity = st.n_noop_identity;
       fresh.n_unknown = st.n_unknown; fresh.truncated = st.truncated;
+      fresh.deadline_on = st.deadline_on; fresh.deadline_hit = st.deadline_hit;
+      fresh.deadline = st.deadline;
       fresh.samples = std::move(st.samples);
       fresh.sidx = std::move(st.sidx);
       fresh.samp_iv = st.samp_iv;
@@ -1837,7 +1859,10 @@ struct Parser {
   }
 
   void run() {
+    uint64_t nstmt = 0;
     for (;;) {
+      if (st.deadline_on && (st.deadline_hit || ((++nstmt & 4095) == 0 && st.past_deadline())))
+        break;
       ws();
       if (p >= e) break;
       char c = *p;
@@ -1987,8 +2012,10 @@ double cost_fraction(const std::vector<double>& samples, const std::vector<uint6
 }  // namespace
 
 int main(int argc, char** argv) {
+  const auto t_start = std::chrono::steady_clock::now();
   try {
     bool trace = false;
+    double deadline_s = -1.0;
     std::vector<int> thresholds{16, 64, 256, 512, 1024};
     const char* path = nullptr;
     for (int i = 1; i < argc; ++i) {
@@ -2012,6 +2039,10 @@ int main(int argc, char** argv) {
           s = c + 1;
         }
         if (thresholds.empty()) throw std::runtime_error("empty --thresholds");
+      } else if (a == "--deadline") {
+        if (i + 1 >= argc) throw std::runtime_error("--deadline needs a value");
+        deadline_s = std::atof(argv[++i]);
+        if (!(deadline_s > 0.0)) throw std::runtime_error("bad --deadline");
       } else if (!a.empty() && a[0] == '-' && a.size() > 1) {
         throw std::runtime_error("unknown option: " + std::string(a));
       } else {
@@ -2020,13 +2051,18 @@ int main(int argc, char** argv) {
     }
     if (!path) {
       std::fprintf(stderr,
-                   "usage: qasm_step [--trace] [--thresholds 16,64,256,512,1024] <path.qasm>\n");
+                   "usage: qasm_step [--trace] [--thresholds 16,64,256,512,1024] [--deadline seconds] <path.qasm>\n");
       return 2;
     }
     std::string src = read_file(path);
     Parser ps(src);
     ps.thresholds = thresholds;
     ps.st.trace = trace;
+    if (deadline_s > 0.0) {
+      ps.st.deadline_on = true;
+      ps.st.deadline = t_start + std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                                     std::chrono::duration<double>(deadline_s));
+    }
     ps.run();
     Stepper& st = ps.st;
     st.qft_finalize();
@@ -2036,7 +2072,12 @@ int main(int argc, char** argv) {
     std::string out = "{";
     bool first = true;
     double nent = static_cast<double>(st.n_ent);
-    emit(out, "st_ok", 1, first);
+    // deadline hit: costs extrapolated by bytes total / bytes parsed (no static 2q pre-count
+    // in the binary), as the Python fallback does with n_2q_estimate / n_2q_processed
+    double cscale = 1.0;
+    if (st.deadline_hit && (st.n_2q + st.n_3q) > 0 && ps.p > ps.b && !src.empty())
+      cscale = std::max(1.0, static_cast<double>(src.size()) / static_cast<double>(ps.p - ps.b));
+    emit(out, "st_ok", st.deadline_hit ? 0.5 : 1, first);
     emit(out, "st_n_qubits", st.n, first);
     emit(out, "st_n_gates", static_cast<double>(st.n_gates), first);
     emit(out, "st_n_1q", static_cast<double>(st.n_1q), first);
@@ -2063,7 +2104,7 @@ int main(int argc, char** argv) {
     emit(out, "st_n_param_parse_err", static_cast<double>(ps.n_param_err), first);
     for (size_t t = 0; t < st.thr.size(); ++t) {
       std::string k = "st_log10_cost_" + std::to_string(st.thr[t]);
-      emit(out, k.c_str(), std::log10(1.0 + st.cost[t]), first);
+      emit(out, k.c_str(), std::log10(1.0 + (st.deadline_hit ? st.cost[t] * cscale : st.cost[t])), first);
     }
     for (size_t t = 0; t < st.thr.size(); ++t) {
       std::string k = "st_frac_2q_sat_" + std::to_string(st.thr[t]);
@@ -2079,7 +2120,7 @@ int main(int argc, char** argv) {
          st.n_2q ? static_cast<double>(st.qft_2q) / static_cast<double>(st.n_2q) : 0.0, first);
     for (size_t t = 0; t < st.thr.size(); ++t) {
       std::string k = "st_log10_cost_ep_" + std::to_string(st.thr[t]);
-      emit(out, k.c_str(), std::log10(1.0 + st.cost_ep[t]), first);
+      emit(out, k.c_str(), std::log10(1.0 + (st.deadline_hit ? st.cost_ep[t] * cscale : st.cost_ep[t])), first);
     }
     emit(out, "st_log10_cut_updates", std::log10(1.0 + nent), first);
     emit(out, "st_mean_span_2q",

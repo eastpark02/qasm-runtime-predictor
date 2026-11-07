@@ -1,7 +1,7 @@
 # Local dev runtime model
 
 The default provider is the pinned `qasm-runtime-predictor` **dev** revision
-`4de52d4365ed8d966f662a75a7431b9dafb2a0af`. Model SHA-256:
+`ffaa06e3a6151a68317ce35527d5a707ac678b8d`. Model SHA-256:
 `becf030147191a76bb74b3fd4384b89f296c1fb344148828082f48c1dca517e5`.
 The four HistGradientBoosting regressors are averaged in log10(seconds), then
 the upstream timeout rule and six-hour cap are applied by the unchanged

@@ -1,8 +1,8 @@
 {
   "provider": "qasm-runtime-predictor",
   "branch": "dev",
-  "commit": "4de52d4365ed8d966f662a75a7431b9dafb2a0af",
-  "version": "dev · 4de52d4",
+  "commit": "ffaa06e3a6151a68317ce35527d5a707ac678b8d",
+  "version": "dev · ffaa06e",
   "training_scope": "upstream_all_rows",
   "rows_fitted": 2648,
   "circuits_fitted": 532,
@@ -10,10 +10,10 @@
   "provenance_note": "Upstream reports fitting 2,648 rows / 532 circuits. This is not the earlier development-only checkpoint. Visualizer inputs remain development/synthetic only; no audit evaluation is performed.",
   "files": {
     "artifacts/model.pkl": "becf030147191a76bb74b3fd4384b89f296c1fb344148828082f48c1dca517e5",
-    "submission/model.py": "fda09b6143830363b98ef4aec3281a6fe41c9b35fde5ac8e640e3bdc79cf9733",
-    "qasm_features.py": "cf8408ae58aacca946a2bdf72c3f66d058c048d27368957652273fdff51fdd10",
-    "qasm_step.py": "6c5873fa7ee4e61b15a91d28868d38da05bc5e6321e22757eeac426dbd48cafe",
-    "qasm_step_py.py": "ac1d4cbd2e0a8038b366904b522d1d26543fc1d7205edd1e5748973c93f0966d",
-    "stepper/qasm_step.cpp": "877a1fe68bf8bb4f1570f4477bffdb3e20dbda037e092aeda96f82a28feeeb76"
+    "submission/model.py": "ecc584ef2e52199cbe317084d9e10c2d8f3ac5bbeea410303422f66b95f6d19d",
+    "qasm_features.py": "2eae9c13b8ebf564d8012fb8fc24073d7c38c4a899c8ec1d0cfd7acd57d3cdd3",
+    "qasm_step.py": "4b7ffa90f44ed0c9dde3ccb8b3806cb0d22dd01fdc453d0925ac2be0259fc627",
+    "qasm_step_py.py": "082453a6cc2daee7b836aa17911b3a8973bc10f33b6171a10b93d1555720c68d",
+    "stepper/qasm_step.cpp": "b7528c424f836fc5ef778d73b04d97c2ac46072ea3c72bc0fa04a93b35b07f6f"
   }
 }

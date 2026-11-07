@@ -38,7 +38,7 @@ def service(tmp_path_factory):
 
 def test_pinned_blend_provenance_and_fingerprints(service):
     info = service.info
-    assert info['commit'] == '4de52d4365ed8d966f662a75a7431b9dafb2a0af'
+    assert info['commit'] == 'ffaa06e3a6151a68317ce35527d5a707ac678b8d'
     assert info['fingerprint'] == 'becf030147191a76bb74b3fd4384b89f296c1fb344148828082f48c1dca517e5'
     assert info['config'] == {'kind': 'HistGradientBoosting blend', 'members': 4}
     assert info['training_scope'] == 'upstream_all_rows'

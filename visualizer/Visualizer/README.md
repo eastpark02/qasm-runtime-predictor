@@ -69,7 +69,7 @@ Only decompressed `.qasm` uploads are accepted; upload limits apply to raw bytes
 ## Runtime checkpoint
 
 Default provider: the pinned `qasm-runtime-predictor` **dev** commit
-`4de52d4365ed8d966f662a75a7431b9dafb2a0af`, using a four-member
+`ffaa06e3a6151a68317ce35527d5a707ac678b8d`, using a four-member
 HistGradientBoosting blend. Checkpoint SHA-256:
 `becf030147191a76bb74b3fd4384b89f296c1fb344148828082f48c1dca517e5`.
 Upstream reports fitting **2,648 rows / 532 circuits** (`upstream_all_rows`);
