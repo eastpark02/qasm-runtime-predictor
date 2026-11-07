@@ -185,11 +185,14 @@ def _detail(text: str, registers: dict[str, list[int]], memo: dict[str, Counter]
     broadcast_adjustment = Counter()
     consumed_chars = 0
     for window in windows:
+        if seen >= max_ops:
+            break
         # Different windows are separate samples, not adjacent program fragments.
         window_ready = Counter()
         exhausted = True
         statement_start = 0
         for match in _DELIMITER.finditer(window):
+            statement_begin = statement_start
             statement = window[statement_start:match.start()].strip()
             statement_start = match.end()
             if match.group() != ";":
@@ -242,7 +245,8 @@ def _detail(text: str, registers: dict[str, list[int]], memo: dict[str, Counter]
             if lowered != "measure":
                 for primitive, count in expanded.items():
                     broadcast_adjustment[primitive] += (width - 1) * count
-            for index in range(width):
+            processed_width = min(width, max_ops - seen)
+            for index in range(processed_width):
                 operands = [item[index if len(item) > 1 else 0] for item in operand_sets]
                 max_arity = max(max_arity, len(operands))
                 depth = max((window_ready[q] for q in operands), default=0) + cost
@@ -255,7 +259,9 @@ def _detail(text: str, registers: dict[str, list[int]], memo: dict[str, Counter]
                         edges.add((min(a, b), max(a, b)))
                 seen += 1
             if seen >= max_ops:
-                consumed_chars += match.end()
+                # A partial broadcast covers only a fraction of this statement,
+                # even if its semicolon is the final character in the program.
+                consumed_chars += statement_begin + (match.end() - statement_begin) * processed_width / width
                 exhausted = False
                 break
         if exhausted:
@@ -365,6 +371,7 @@ def featurize(qasm_text: str) -> dict[str, float]:
     diagonal = sum(expanded[g] for g in _DIAGONAL)
     rotations = sum(expanded[g] for g in _ROTATIONS)
     comps, largest, degree = _components(offset, detail["edges"])
+    degree_mean = sum(degree) / offset
     n_ops = max(1, operations)
     depth = detail["depth"] / max(detail["coverage"], 1e-9)
     # Expose large custom-body structure without exploding the executable program.
@@ -401,8 +408,8 @@ def featurize(qasm_text: str) -> dict[str, float]:
         "sample_interaction_density": 2 * len(detail["edges"]) / max(1, offset * (offset - 1)),
         "sample_components": comps, "sample_largest_component": largest,
         "sample_degree_max": max(degree, default=0),
-        "sample_degree_mean": sum(degree) / offset,
-        "sample_degree_variance": sum((d - sum(degree) / offset) ** 2 for d in degree) / offset,
+        "sample_degree_mean": degree_mean,
+        "sample_degree_variance": sum((d - degree_mean) ** 2 for d in degree) / offset,
         "sample_active_qubits": len(detail["usage"]),
         "sample_qubit_load_max": max(detail["usage"].values(), default=0),
         "max_gate_arity_sample": detail["max_arity"],

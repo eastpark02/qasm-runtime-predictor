@@ -57,6 +57,23 @@ Register-wide count correction is exact only when full
 dependency analysis is available. Clifford counts are lower bounds because
 rotation parameter values are not symbolically classified.
 
+Dependency analysis stops at 25,000 operation instances across all sampled
+windows, counting each register-broadcast instance separately. Each custom gate
+instance still uses the existing operation-count/arity depth proxy. A broadcast
+that exceeds the remaining budget contributes only its processed prefix to
+depth, qubit usage, and graph features. `dependency_sample_fraction` estimates
+character coverage, weighting a partially processed statement by the fraction of
+its broadcast instances examined; it is not a fraction of circuit operations.
+Previously such broadcasts could exceed the budget and incorrectly report full
+coverage. Enforcing the limit can change the sampled graph and depth features,
+and disables the full-coverage register correction for `n_ops`, `gate_*`, and
+derived histogram features on these inputs. Those histograms retain the
+uncorrected statement-based broadcast counts, which can undercount operations.
+For small programs, `expanded_counts_complete=1` describes custom-definition
+composition; it does not certify broadcast multiplicities when dependency
+coverage is incomplete. Feature keys, sampling budgets, and gate families are
+unchanged.
+
 This is a structural feature parser, not a complete QASM validator/interpreter:
 arbitrary classical control flow, aliases, symbolic register sizes, and gate
 modifiers are not expanded. Unresolved dependency operands are reported as a
