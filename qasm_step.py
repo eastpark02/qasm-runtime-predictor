@@ -8,7 +8,10 @@ Subprocess wrapper around the C++ moment stepper (stepper/qasm_step[.exe]).
 Any failure (no binary, nonzero exit, timeout, bad JSON, missing/non-finite keys)
 kills the process, removes the temp file, and returns the pure-Python fallback
 (qasm_step_py.py). Never raises, never returns NaN.
-st_ok: 1 = binary, 0.75 = fallback, 0.5 = fallback hit its deadline.
+st_ok: 1 = binary, 0.75 = fallback, 0.5 = binary or fallback hit its deadline.
+start_step(..., t_start=t) passes `--deadline` so the binary stops itself (st_ok 0.5,
+st_truncated 1, costs extrapolated) at ~_BIN_DEADLINE_S seconds after t; the
+finish_step timeout stays as a backstop. Without t_start no deadline is passed.
 """
 from __future__ import annotations
 
@@ -28,6 +31,8 @@ from qasm_step_py import DEFAULT_THRESHOLDS, py_step, st_cols  # noqa: E402
 ST_COLS = st_cols(DEFAULT_THRESHOLDS)
 # total per-circuit budget the fallback may use, counted from start_step()
 _BUDGET_S = 13.0
+# the binary is told to stop itself this many seconds after the caller's t_start
+_BIN_DEADLINE_S = 11.0
 
 
 def find_binary():
@@ -57,9 +62,10 @@ def _is_path(x):
         return False
 
 
-def start_step(path_or_text, thresholds=None) -> _Handle:
+def start_step(path_or_text, thresholds=None, t_start=None) -> _Handle:
     h = _Handle()
     h.t0 = time.perf_counter()
+    t_ref = h.t0 if t_start is None else t_start
     h.proc = None
     h.tmp = False
     h.text = None
@@ -82,6 +88,9 @@ def start_step(path_or_text, thresholds=None) -> _Handle:
         cmd = [exe]
         if thresholds:
             cmd += ["--thresholds", ",".join(str(int(t)) for t in h.thresholds)]
+        if t_start is not None:
+            left = max(1.0, _BIN_DEADLINE_S - (time.perf_counter() - t_ref))
+            cmd += ["--deadline", "%.3f" % left]
         cmd.append(h.path)
         h.proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                   stderr=subprocess.DEVNULL)

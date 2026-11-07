@@ -54,3 +54,14 @@ QFTs, swap tests, BV oracles). Day one over-predicted them by 0.2–0.3 dex; the
 Short, heavily entangled circuits (126–2,000 gates, χ 7–49) are still over-predicted by 0.4–0.9 dex: the swap-chain
 cost model charges long-range gates too much. Timeout rows score 0.73 on 57 rows. Expect a hold-out drop similar
 to the organizers' (−4 pts); our unique-circuit score of 0.763 is the conservative estimate.
+
+**Time guards (15 s per-circuit cap).** Spec-valid files near 256 MB (20M one-line gates, 1.6M gate
+definitions, a 100-qubit QFT gate called 25k times, 2,000-operand star gates) used to take 17–150 s.
+Now the Python parser stops at 9 s and scales its counts, depth and cut crossings by 1/(fraction of lines
+read); the C++ stepper gets `--deadline` and stops at ~11 s (st_ok 0.5, costs scaled by bytes total / bytes
+read); the Python fallback checks the clock every 256 gates and cut updates and returns a hint-based
+estimate when < 2 s remain. Measured worst case: 11.0 s with the binary, 13.0 s with the binary missing
+(load ≈ 3). Files that finish in time give byte-identical features. Extrapolation is crude when the
+work is not spread evenly through the file (e.g. all definitions first, one call at the end). Parser slices
+start at 16 lines so a tiny file of very expensive lines is still caught, and the cut statistics are
+computed per segment, so a 100M-qubit register no longer costs 7 s after the deadline.

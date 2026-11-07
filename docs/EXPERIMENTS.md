@@ -66,6 +66,24 @@ If any blend member predicts >= 60% of the cap, predict the cap. On out-of-fold 
 the 57 timeout rows from 0.708 to 0.813 and costs the other 2,591 rows 0.0003 (net +0.002; selected on
 57 rows, so treat as weak).
 
+## Time guards (holdout-shape audit)
+Twenty reproduced spec-valid holdout shapes broke the 15 s cap (17–34 s in the parser or binary, 35–150 s
+in the fallback). Guards: `qasm_features.featurize(text, deadline_at)` reads the clock between slices of
+1,024 lines (slices shrink if one takes > 50 ms), every 1,024 gate-body statements and every 1,024
+statements of a long line, then extrapolates additive features by 1/f; `qasm_step --deadline s`
+(steady_clock, every 4,096 primitives / cut updates / statements) emits st_ok 0.5, st_truncated 1 and
+costs × bytes total / bytes read; the fallback checks every 256 primitives and cut updates. Results on
+this Mac (load 3–4): 23 audit shapes with the binary all finish in 1.0–11.0 s (dense 20M lines 9.1 s,
+wide-QFT calls 11.0 s); 9 shapes with the binary removed finish in ≤ 13.0 s. Without a deadline firing,
+the binary JSON and the parser dict are identical to before on 10 training circuits (incl. ebc3e166,
+24ca3082, 0534bf07, 445caba2).
+Follow-up after review: parser slices now start at 16 lines and grow ×4 to 1,024 while a slice takes
+< 5 ms (a 9 KB file of 1,100 `cx` broadcasts over 100k-qubit registers took 52 s, now 9.2 s; 1,100 calls
+of a 600-qubit gate 31 s → 9.1 s). `_finalize` computes cut crossings per segment between pair endpoints
+(O(distinct pairs), not O(n_qubits)), so `qreg q[100000000]` with 2 gates went 15.3 s → 2.7 s, and the
+loop stops early by 0.4 µs × distinct pairs (≤ 4 s) to leave room for the per-pair pass (10M random pairs
+on 1M qubits: 12.4 → 11.8 s). Still identical on all 532 corpus files (binary JSON and parser dict).
+
 ## Shipped
 `artifacts/model.pkl` = blend4 without twin. Harness dry run on all 532 compressed train circuits:
 2,660 rows, no crashes, worst parse 7.0 s, worst predict 2.4 s (under CPU contention). Before the
