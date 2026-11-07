@@ -218,12 +218,13 @@ class RuntimeModel:
         # Must never raise: a circuit that crashes featurize scores zero on all its rows.
         t0 = time.perf_counter()
         try:
-            h = start_step(qasm_text)
+            h = start_step(qasm_text, t_start=t0)
         except Exception as e:
             print("featurize: start_step failed (%r); using fallback" % (e,), file=sys.stderr)
             h = None
         try:
-            f = _featurize(qasm_text)
+            # static parser stops at t0 + 9 s and extrapolates its additive counts
+            f = _featurize(qasm_text, deadline_at=t0 + 9.0)
         except Exception as e:
             print("featurize: parser failed (%r); using all-zero features" % (e,), file=sys.stderr)
             f = {c: 0.0 for c in self._raw_cols}

@@ -8,7 +8,9 @@ missing, fails or times out, and for a deterministic ~3 % of training rows.
 st_ok: 0.75 = fallback finished, 0.5 = fallback hit its deadline (costs scaled by
 n_2q_estimate / n_2q_processed), 0.25 = deadline hit before any 2q gate was processed
 (st_log10_cost_T guessed as log10(1 + n2q_hint * 4^min(4, log2 T)), everything else as
-for 0.5), 0.0 = fallback itself crashed (all zeros). The effective deadline is >= 1.5 s.
+for 0.5), 0.0 = fallback itself crashed (all zeros). The effective deadline is >= 1.5 s;
+with less than 2 s left the fallback does no work and returns the 0.25 estimate directly.
+The clock is read every 256 primitives and every 256 cut updates (long-span gates).
 
 Choices the binary contract leaves open (reconcile with stepper/qasm_step.cpp):
   * st_log10_cost_T = log10(1 + cost_T)  (never -inf)
@@ -244,6 +246,8 @@ class _Stepper:
                 epmax[i] = d
         self.n_updates += 1
         self.c["ent"] += 1
+        if self.n_updates & 255 == 0 and time.perf_counter() > self.deadline_at:
+            raise _Deadline  # one long-span edge can be ~1e5 updates
         new = min(c + r, left + 1, right + 1, k + 1, self.n - k - 1)
         if new > c:
             chi[k] = new
@@ -257,8 +261,8 @@ class _Stepper:
         g += 1
         c["n_gates"] = g
         self.gate_since_snap = True
-        if g & 4095 == 0:
-            if time.perf_counter() > self.deadline_at or g >= MAX_PRIMS:
+        if g & 255 == 0:
+            if time.perf_counter() > self.deadline_at or (g & 4095 == 0 and g >= MAX_PRIMS):
                 raise _Deadline
         basis = self.basis
         k = len(qs)
@@ -536,6 +540,9 @@ def py_step(text: str, deadline_s: float = 12.0, n2q_hint=None,
         return {**dict.fromkeys(st_cols(thresholds), 0.0)}
     ok, scale = 0.75, 1.0
     guess = False
+    if deadline_s < 2.0:  # too little time to step anything useful: hint-based estimate
+        ok, guess = 0.25, True
+        text = ""
     try:
         if "//" in text or "/*" in text:
             text = _COMMENT.sub(" ", text)

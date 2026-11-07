@@ -12,13 +12,19 @@ One pass over the text, never builds a circuit object. Handles:
     summarised once (counts, depth, 2q interaction pairs) and that summary is
     applied at every call site. No inline expansion, so 500k definitions stay cheap.
 
-Public API:  featurize(qasm_text: str) -> dict[str, float]
+Public API:  featurize(qasm_text: str, deadline_at=None) -> dict[str, float]
+
+deadline_at (a time.perf_counter() value): the clock is read every ~1024 lines, every
+1024 statements of a gate body and every 1024 statements of a multi-statement line. If it
+passes, parsing stops and the additive features are extrapolated by 1/f (f = fraction of
+lines consumed); output for a file that finishes in time is unchanged.
 """
 
 from __future__ import annotations
 
 import math
 import re
+import time
 from collections import Counter
 
 _PARAMS_RE = re.compile(r"\([^()]*(?:\([^()]*\)[^()]*)*\)")
@@ -30,6 +36,13 @@ ccx ccz rccx rcccx c3x c3sx c4x cswap mcx mcphase xx_minus_yy xx_plus_yy fsim
 """.split())
 SKIP_PREFIXES = ("include", "OPENQASM", "//", "opaque", "input", "output", "const",
                  "int", "uint", "float", "angle", "bool", "duration", "stretch")
+
+
+class _ParseDeadline(Exception):
+    """Raised inside a gate body / long line when the deadline passes; arg = fraction done."""
+
+
+_SLICE = 1024
 
 
 class _Summary:
@@ -308,10 +321,22 @@ def _parse_gate_def(text, gates, state):
         gates[name] = hit
         return
     sc = _Scope(gates, local_args=arg_names)
-    for st in body.split(";"):
-        st = st.strip()
-        if st:
-            _run_statement(sc, st, False, state)
+    stmts = body.split(";")
+    dl = state.get("deadline_at")
+    if dl is None or len(stmts) <= _SLICE:
+        for st in stmts:
+            st = st.strip()
+            if st:
+                _run_statement(sc, st, False, state)
+    else:
+        ns = len(stmts)
+        for j in range(0, ns, _SLICE):
+            if time.perf_counter() > dl:
+                raise _ParseDeadline(j / ns)
+            for st in stmts[j:j + _SLICE]:
+                st = st.strip()
+                if st:
+                    _run_statement(sc, st, False, state)
     summ = _Summary(len(arg_names))
     summ.counts = sc.counts
     summ.depth = max(sc.level) if sc.level else 0
@@ -329,8 +354,8 @@ def _shape_cache_get(state, key, gates):
     return state["shape_cache"].get(key)
 
 
-def featurize(text: str) -> dict:
-    state = {"n_if": 0, "n_gate_defs": 0, "shape_cache": {}}
+def featurize(text: str, deadline_at=None) -> dict:
+    state = {"n_if": 0, "n_gate_defs": 0, "shape_cache": {}, "deadline_at": deadline_at}
     gates: dict = {}
     top = _Scope(gates)
     version = 2.0
@@ -347,70 +372,190 @@ def featurize(text: str) -> dict:
     pending_gate = None
     cond_depth = 0  # depth of open v3 `if {` blocks
     run = _run_statement
-    for line in lines:
-        s = line.strip()
-        if not s:
-            continue
-        if pending_gate is not None:
-            pending_gate.append(s)
-            if "}" in s:
-                _parse_gate_def(" ".join(pending_gate), gates, state)
-                pending_gate = None
-            continue
-        c0 = s[0]
-        if c0 == "/":
-            continue
-        if c0 == "g" and s.startswith("gate ") :
-            if "}" in s:
-                _parse_gate_def(s, gates, state)
-            else:
-                pending_gate = [s]
-            continue
-        if c0 == "}":
-            # closes an if/else block (or `} else {`)
-            if "{" in s:
-                continue
-            cond_depth = max(0, cond_depth - 1)
-            continue
-        if s[-1] == "{":
-            # v3 `if (cond) {` / `else {`
-            if s.startswith("if") or s.startswith("else"):
-                state["n_if"] += 1
-                cond_depth += 1
-            continue
-        if s.count(";") > 1:
-            stmts = s.split(";")
-        else:
-            stmts = (s[:-1] if s[-1] == ";" else s,)
-        for st in stmts:
-            st = st.strip()
-            if st:
-                run(top, st, cond_depth > 0, state)
-
+    # Without a deadline the whole file is one slice. With one, the clock is read between
+    # slices of `chunk` lines; the slice shrinks when one slice takes > 50 ms (expensive
+    # lines, e.g. calls of a wide custom gate), so the overshoot stays small.
+    pos = 0
+    # With a deadline, start at 16 lines and grow x4 (up to _SLICE) while a slice takes
+    # < 5 ms, so a file of a few very expensive lines is still checked early.
+    chunk = n_lines if deadline_at is None else 16
+    frac = None
+    line = None
+    pending_first = None  # first line object of an open multi-line gate definition
+    try:
+        while pos < n_lines:
+            if deadline_at is not None:
+                t_now = time.perf_counter()
+                # reserve time for _finalize's per-pair loop (~0.35 us/pair measured; at
+                # most 4 s, which only matters past ~10M distinct qubit pairs)
+                if t_now > deadline_at - min(4.0, 4e-7 * len(top.pairs)):
+                    frac = pos / n_lines
+                    break
+            end = pos + chunk
+            for line in (lines if deadline_at is None else lines[pos:end]):
+                s = line.strip()
+                if not s:
+                    continue
+                if pending_gate is not None:
+                    pending_gate.append(s)
+                    if "}" in s:
+                        _parse_gate_def(" ".join(pending_gate), gates, state)
+                        pending_gate = None
+                    continue
+                c0 = s[0]
+                if c0 == "/":
+                    continue
+                if c0 == "g" and s.startswith("gate ") :
+                    if "}" in s:
+                        _parse_gate_def(s, gates, state)
+                    else:
+                        pending_gate = [s]
+                        pending_first = line
+                    continue
+                if c0 == "}":
+                    # closes an if/else block (or `} else {`)
+                    if "{" in s:
+                        continue
+                    cond_depth = max(0, cond_depth - 1)
+                    continue
+                if s[-1] == "{":
+                    # v3 `if (cond) {` / `else {`
+                    if s.startswith("if") or s.startswith("else"):
+                        state["n_if"] += 1
+                        cond_depth += 1
+                    continue
+                if s.count(";") > 1:
+                    stmts = s.split(";")
+                    if deadline_at is not None and len(stmts) > _SLICE:
+                        ns = len(stmts)
+                        for j in range(0, ns, _SLICE):
+                            if time.perf_counter() > deadline_at:
+                                raise _ParseDeadline(j / ns)
+                            for st in stmts[j:j + _SLICE]:
+                                st = st.strip()
+                                if st:
+                                    run(top, st, cond_depth > 0, state)
+                        continue
+                else:
+                    stmts = (s[:-1] if s[-1] == ";" else s,)
+                for st in stmts:
+                    st = st.strip()
+                    if st:
+                        run(top, st, cond_depth > 0, state)
+            if deadline_at is not None:
+                dt = time.perf_counter() - t_now
+                if dt > 0.05 and chunk > 16:
+                    chunk = max(16, chunk // 4)
+                elif dt < 0.005 and chunk < _SLICE:
+                    chunk = min(_SLICE, chunk * 4)
+            pos = end
+    except _ParseDeadline as ex:
+        # stopped inside one line (long gate body or long multi-statement line)
+        inner = ex.args[0] if ex.args else 0.0
+        end = min(pos + chunk, n_lines)
+        k = next((i for i in range(pos, end) if lines[i] is line), pos)
+        k0 = k
+        if pending_gate is not None and pending_first is not None:
+            k0 = next((i for i in range(k, -1, -1) if lines[i] is pending_first), k)
+        frac = (k0 + inner * (k - k0 + 1)) / n_lines
+    if frac is not None:
+        return _finalize(top, version, len(text), n_lines, state,
+                         scale=1.0 / max(frac, 1.0 / max(n_lines, 1)))
     return _finalize(top, version, len(text), n_lines, state)
 
 
-def _finalize(sc: _Scope, version, n_bytes, n_lines, state) -> dict:
+def _sum_min(lo, hi, v):
+    """sum_{t=lo..hi} min(v, t) for integers lo <= hi (0 if empty), v >= 0."""
+    if lo > hi:
+        return 0
+    top = v if isinstance(v, int) else math.floor(v)
+    u = min(hi, top)
+    if u < lo:
+        return v * (hi - lo + 1)
+    return (lo + u) * (u - lo + 1) // 2 + v * (hi - u)
+
+
+def _cut_stats(diff, L):
+    """Cut-crossing stats over cuts 0..L-1 from a sparse difference map.
+    Returns (max, mean, central-half max, max capacity, sum capacity) where
+    capacity(k) = min(cross(k), k+1, L-k)."""
+    if L <= 0:
+        return 0, 0.0, 0, 0, 0
+    q1 = L // 4
+    q3 = max(L * 3 // 4, L // 4 + 1)
+    c = (L + 1) // 2  # h(k) = k+1 for k < c, L-k for k >= c
+
+    def h(k):
+        return min(k + 1, L - k)
+
+    max_cross = None
+    mid_max = None
+    max_cap = None
+    sum_cross = 0
+    sum_cap = 0
+    run = 0
+    prev = 0
+    pts = sorted(k for k in diff if k < L)
+    pts.append(L)
+    for p in pts:
+        if p > prev:
+            a, b, v = prev, p, run
+            if max_cross is None or v > max_cross:
+                max_cross = v
+            if a < q3 and b > q1 and (mid_max is None or v > mid_max):
+                mid_max = v
+            sum_cross += v * (b - a)
+            # sum of min(v, h(k)) over the rising and the falling part of the tent
+            sum_cap += _sum_min(a + 1, min(b, c), v)
+            sum_cap += _sum_min(L - b + 1, L - max(a, c), v)
+            if b <= c:
+                hmax = h(b - 1)
+            elif a >= c:
+                hmax = h(a)
+            else:
+                hmax = max(h(c - 1), h(c))
+            cm = min(v, hmax)
+            if max_cap is None or cm > max_cap:
+                max_cap = cm
+        if p < L:
+            run += diff[p]
+            prev = p
+    return max_cross, sum_cross / L, mid_max, max_cap, sum_cap
+
+
+def _finalize(sc: _Scope, version, n_bytes, n_lines, state, scale=None) -> dict:
+    """scale (deadline hit): extrapolate the additive quantities by this factor; qubit,
+    clbit, byte and line counts and the distinct-name / degree / max-span stats stay as seen."""
     c = sc.counts
     n = sc.n_q
     lv = sc.level
-    used = [i for i in range(n) if lv[i] > 0]
-    n_used = len(used)
+    n_used = (n - lv.count(0)) if len(lv) == n else sum(1 for i in range(n) if lv[i] > 0)
     depth = max(lv) if lv else 0
     depth2 = max(sc.level2) if sc.level2 else 0
+    n_barrier, n_custom = sc.n_barrier, sc.n_custom_calls
+    n_if, n_defs, n_pairs = state["n_if"], state["n_gate_defs"], len(sc.pairs)
+    if scale is not None:
+        c = [x * scale for x in c]
+        depth, depth2 = depth * scale, depth2 * scale
+        n_barrier, n_custom = n_barrier * scale, n_custom * scale
+        n_if, n_defs, n_pairs = n_if * scale, n_defs * scale, n_pairs * scale
 
-    # Interaction statistics. Use difference array over cuts for "cut crossings":
-    # cut k sits between qubit k and k+1; a 2q gate (a,b) crosses cuts a..b-1.
-    diff = [0] * (n + 1)
+    # Interaction statistics. Use a sparse difference map over cuts for "cut crossings":
+    # cut k sits between qubit k and k+1; a 2q gate (a,b) crosses cuts a..b-1. The crossing
+    # count is constant between endpoints, so all cut stats are computed per segment
+    # (O(distinct pairs), not O(n_qubits)); integer results equal the per-cut loop exactly.
+    diff = {}
     dist_sum = 0
     dist_max = 0
     n_nonlocal = 0
     n2 = 0
     deg = Counter()
     for (a, b), m in sc.pairs.items():
+        if scale is not None:
+            m = m * scale
         d = b - a
-        diff[a] += m
-        diff[b] -= m
+        diff[a] = diff.get(a, 0) + m
+        diff[b] = diff.get(b, 0) - m
         dist_sum += d * m
         n2 += m
         if d > dist_max:
@@ -419,19 +564,7 @@ def _finalize(sc: _Scope, version, n_bytes, n_lines, state) -> dict:
             n_nonlocal += m
         deg[a] += 1
         deg[b] += 1
-    cross = []
-    run = 0
-    for k in range(max(n - 1, 0)):
-        run += diff[k]
-        cross.append(run)
-    max_cross = max(cross) if cross else 0
-    mean_cross = (sum(cross) / len(cross)) if cross else 0.0
-    # Entanglement capacity per cut: log2 bond dim can't exceed min(crossings, qubits on smaller side)
-    cap = [min(cross[k], k + 1, n - k - 1) for k in range(len(cross))]
-    max_cap = max(cap) if cap else 0
-    sum_cap = sum(cap)
-    # "middle cut" = max over the central half (where bonds grow largest for MPS)
-    mid = cross[len(cross) // 4: max(len(cross) * 3 // 4, len(cross) // 4 + 1)] if cross else [0]
+    max_cross, mean_cross, mid_max, max_cap, sum_cap = _cut_stats(diff, max(n - 1, 0))
 
     tot = c[_C_TOTAL]
     f = {
@@ -450,14 +583,14 @@ def _finalize(sc: _Scope, version, n_bytes, n_lines, state) -> dict:
         "n_measure": c[_C_MEAS],
         "n_reset": c[_C_RESET],
         "n_conditional": c[_C_COND],
-        "n_if_blocks": state["n_if"],
-        "n_barrier": sc.n_barrier,
-        "n_gate_defs": state["n_gate_defs"],
-        "n_custom_calls": sc.n_custom_calls,
+        "n_if_blocks": n_if,
+        "n_barrier": n_barrier,
+        "n_gate_defs": n_defs,
+        "n_custom_calls": n_custom,
         "depth": depth,
         "depth_2q": depth2,
         "n_distinct_gates": len(sc.names),
-        "n_distinct_pairs": len(sc.pairs),
+        "n_distinct_pairs": n_pairs,
         "max_degree": max(deg.values()) if deg else 0,
         "mean_degree": (sum(deg.values()) / n_used) if n_used else 0.0,
         "gate_dist_mean": dist_sum / n2 if n2 else 0.0,
@@ -465,7 +598,7 @@ def _finalize(sc: _Scope, version, n_bytes, n_lines, state) -> dict:
         "frac_nonlocal_2q": n_nonlocal / n2 if n2 else 0.0,
         "cut_cross_max": max_cross,
         "cut_cross_mean": mean_cross,
-        "cut_cross_mid_max": max(mid) if mid else 0,
+        "cut_cross_mid_max": mid_max,
         "ent_cap_max": max_cap,
         "ent_cap_sum": sum_cap,
         "frac_2q": c[_C_2Q] / tot if tot else 0.0,
