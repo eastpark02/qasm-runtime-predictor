@@ -1,9 +1,11 @@
 """Original bounded-cost structural feature parser for the challenge corpus.
 
-Small-program gate histograms are recursively composed across custom definitions.
-Large programs use explicitly marked histogram estimates from bounded, evenly
-spaced text windows. Dependency and interaction features are proxies and expose
-their coverage. The code never executes QASM,
+At most 8,000,000 comment-stripped characters use static called-definition
+composition; larger inputs estimate written-body histograms, including unused
+definitions, from bounded text windows. Broadcast correction requires full
+dependency text coverage in the small branch. Neither branch executes loops or
+selects conditional branches. Dependency and interaction features are proxies;
+their coverage is a text fraction, not an operation fraction. The code never executes QASM,
 follows include paths, evaluates expressions, or uses filenames/known identities.
 It is a feature parser, not a general OpenQASM interpreter or syntax validator.
 """
@@ -40,6 +42,7 @@ _ROTATIONS = frozenset({"rx", "ry", "rz", "p", "phase", "u", "u1", "u2", "u3", "
 _BUILTINS = tuple(sorted(_CLIFFORD | _DIAGONAL | _ROTATIONS | _TWO_QUBIT | _THREE_QUBIT | {"t", "tdg"}))
 _MAX_DETAIL_CHARS = 1_500_000
 _MAX_DETAIL_OPS = 25_000
+# Historical name: this selects the histogram branch, not semantic completeness.
 _EXACT_EXPANSION_MAX_CHARS = 8_000_000
 
 
@@ -102,7 +105,7 @@ def _counts(text: str) -> Counter:
 
 
 def _parts(text: str) -> tuple[str, dict[str, _Definition]]:
-    """Remove gate definitions from executed program; preserve their summaries."""
+    """Separate written main text from gate definitions; preserve static summaries."""
     definitions = {}
     fragments = []
     cursor = 0
@@ -307,7 +310,8 @@ def featurize(qasm_text: str) -> dict[str, float]:
     if large:
         # Hundreds of thousands of distinct custom definitions occur in this
         # corpus. Bound allocation and analysis by text size, never circuit ID.
-        # Definitions precede executable declarations in the supplied format.
+        # Main/dependency text is approximated by the suffix after the last
+        # definition. Declarations are still scanned across the entire text.
         definition_count, end_definitions = _definition_info(text)
         main = text[end_definitions + 1:] if end_definitions >= 0 else text
         definitions = {}
@@ -332,6 +336,8 @@ def featurize(qasm_text: str) -> dict[str, float]:
         raise ValueError("No declared quantum registers")
     histogram_coverage = 1.0
     if large:
+        # Sample all written text, including unused definition bodies. Scale by
+        # semicolon counts, without resolving custom-call multiplicities or loops.
         windows, histogram_coverage = _windows(text, _MAX_DETAIL_CHARS)
         sampled = Counter()
         sample_statements = 0
@@ -360,7 +366,9 @@ def featurize(qasm_text: str) -> dict[str, float]:
         custom_calls = sum(count for name, count in calls.items() if name in definitions)
         custom_body_ops = sum(sum(definition.calls.values()) for definition in definitions.values())
     detail = _detail(main, registers, memo)
-    # Whole-register gate broadcasts are exact when full detail was examined.
+    # Apply recognized broadcast multiplicities only with full small-branch
+    # dependency text coverage. Unresolved syntax/control flow is still static;
+    # incomplete coverage leaves the statement-based histogram uncorrected.
     if detail["coverage"] == 1.0 and not large:
         expanded.update(detail["broadcast_adjustment"])
     operations = sum(expanded.values())
@@ -374,7 +382,9 @@ def featurize(qasm_text: str) -> dict[str, float]:
     degree_mean = sum(degree) / offset
     n_ops = max(1, operations)
     depth = detail["depth"] / max(detail["coverage"], 1e-9)
-    # Expose large custom-body structure without exploding the executable program.
+    # Preserve historical feature names: expanded_counts_complete is only the
+    # size-branch indicator. The Clifford-named quantities classify gate names;
+    # sampled/static counts are not rigorous bounds on executed-circuit behavior.
     feature = {
         "n_qubits": offset, "n_registers": len(registers),
         "n_ops": operations, "log1p_ops": math.log1p(operations),
