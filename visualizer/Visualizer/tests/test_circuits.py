@@ -54,7 +54,7 @@ def test_invalid_or_unsupported_qasm_is_explicit(bad):
 
 def calculate(key, step, pair=(0, 1)):
     source = EXAMPLES[key]['qasm']
-    return _state({'qasm': prefix(source, parse(source), step), 'pair': pair})
+    return _state({'qasm': prefix(source, parse(source), step), 'pair': pair, 'include_joint': True})
 
 
 def test_product_states_have_unit_bloch_vectors_and_zero_entropy():
@@ -105,8 +105,10 @@ def test_state_limits_expanded_custom_gate_and_qubits():
     source = 'OPENQASM 2.0;\ninclude "qelib1.inc";\n' + definitions + 'qreg q[1];\ng13 q[0];'
     with pytest.raises(ValueError, match='10,000'):
         _state({'qasm': source})
-    with pytest.raises(ValueError, match='12 qubits'):
-        _state({'qasm': HEADER.replace('q[2]', 'q[13]') + 'h q[0];'})
+    result = _state({'qasm': HEADER.replace('q[2]', 'q[13]') + 'h q[0];'})
+    assert result['selected_qubits'] == [0]
+    assert result['causal_cone']['simulated_qubits'] == 1
+    assert result['global_joint_complete'] is False
 
 
 def test_killable_worker_timeout_and_recovery():

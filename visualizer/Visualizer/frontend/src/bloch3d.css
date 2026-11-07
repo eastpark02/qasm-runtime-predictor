@@ -1,0 +1,15 @@
+.bloch-studio { margin: 10px 0 12px; border: 1px solid #344d54; border-radius: 12px; overflow: hidden; background: #111c24; color: #b6cbd1; }
+.bloch-studio .bloch-viewport { position: relative; width: 100%; height: 238px; overflow: hidden; cursor: grab; touch-action: none; outline-offset: -3px; }
+.bloch-studio .bloch-viewport:active { cursor: grabbing; }
+.bloch-studio .bloch-viewport:focus-visible { outline: 2px solid #81f1c1; }
+.bloch-studio canvas, .bloch-studio .bloch-fallback, .bloch-axis-labels { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
+.bloch-axis-labels { pointer-events: none; }
+.bloch-axis-labels span { position: absolute; transform: translate(-50%, -50%); white-space: nowrap; font: 11px 'IBM Plex Mono', monospace; color: #d6e7e7; padding: 1px 3px; background: #111c24d9; border-radius: 3px; }
+.bloch-studio .bloch-hidden { display: none; }
+.bloch-fallback text { fill: #d6e7e7; font: 11px monospace; }
+.bloch-tools { display: flex; justify-content: space-between; align-items: center; gap: 5px; padding: 0 9px 7px; font-size: 11px; }
+.bloch-tools button { font: inherit; color: #d6e7e7; border: 1px solid #476069; border-radius: 5px; background: #1a3039; padding: 3px 6px; cursor: pointer; }
+.bloch-tools button:disabled { opacity: .5; cursor: default; }
+.bloch-coordinates { border-top: 1px solid #2b4049; padding: 7px 6px; text-align: center; white-space: nowrap; font: 11px 'IBM Plex Mono', monospace; color: #b6cbd1; }
+@media (max-width: 600px) { .bloch-studio .bloch-viewport { height: 240px; } }
+

@@ -23,7 +23,7 @@ from .model_service import ModelService
 from .dev_model import DevModelService
 from .workers import run_isolated
 from .inspector import native_parse, native_index, native_window, expanded_prefix, verified_inspector, WINDOW_SIZE
-from .limits import DEFAULT_UPLOAD_BYTES, INTERACTIVE_BYTES, PYTHON_FALLBACK_BYTES, validate_upload_bytes
+from .limits import DEFAULT_UPLOAD_BYTES, INTERACTIVE_BYTES, PYTHON_FALLBACK_BYTES, validate_upload_bytes, STATE_TIMEOUT_SECONDS, STATE_MEMORY_BYTES, STATE_VECTOR_QUBITS, STATE_STABILIZER_QUBITS, STATE_MPS_QUBITS, STATE_JOINT_QUBITS, STATE_OPERATIONS
 
 ROOT = Path(__file__).resolve().parents[2]
 MAX_BYTES = DEFAULT_UPLOAD_BYTES
@@ -68,7 +68,7 @@ class Settings:
     pipeline: Path = Path(os.environ.get('VISUALIZER_PIPELINE', str(ROOT.parent / 'ml-agent-pipeline')))
     predictor: Path = Path(os.environ.get('VISUALIZER_PREDICTOR', str(ROOT.parent / 'quantum-runtime-prediction-model' / 'qasm-runtime-predictor')))
     model_provider: str = os.environ.get('VISUALIZER_MODEL', 'dev')
-    state_timeout: float = 10
+    state_timeout: float = STATE_TIMEOUT_SECONDS
     max_upload_bytes: int = field(default_factory=lambda: int(os.environ.get('VISUALIZER_MAX_UPLOAD_BYTES', DEFAULT_UPLOAD_BYTES)))
     large_feature_timeout: float = field(default_factory=lambda: float(os.environ.get('VISUALIZER_LARGE_FEATURE_TIMEOUT', '180')))
     large_feature_memory_bytes: int = field(default_factory=lambda: int(os.environ.get('VISUALIZER_LARGE_FEATURE_MEMORY_BYTES', str(3 * 1024 ** 3))))
@@ -86,6 +86,14 @@ class Checkpoint(BaseModel):
     step_kind: Literal['source', 'expanded'] = 'source'
     threshold: int = Field(default=256, ge=1, le=1_048_576)
     pair: tuple[int, int] = (0, 1)
+
+
+class StateCheckpoint(Checkpoint):
+    qubits: tuple[int, ...] | None = Field(default=None, min_length=1, max_length=2)
+    method: Literal['auto', 'stabilizer', 'statevector', 'matrix_product_state'] = 'auto'
+    include_joint: bool = False
+    mps_max_bond: int = Field(default=64, ge=2, le=128)
+    mps_cutoff: float = Field(default=1e-10, ge=0, le=1e-3, allow_inf_nan=False)
 
 
 def create_app(settings=None, model=None):
@@ -119,6 +127,7 @@ def create_app(settings=None, model=None):
         application.state.traces = LRU(4)
         application.state.workers = threading.BoundedSemaphore(2)
         application.state.large_workers = threading.BoundedSemaphore(1)
+        application.state.state_workers = threading.BoundedSemaphore(1)
         try:
             _, application.state.inspector_build = verified_inspector(settings.root)
             application.state.inspector_error = None
@@ -170,6 +179,8 @@ def create_app(settings=None, model=None):
     from .qbraid_api import create_qbraid_router
     cloud_ideals = {}
     def remember_cloud_ideal(cid, record, request, result):
+        if result.get('global_joint_complete') is not True:
+            return
         probabilities = result.get('ideal_probabilities')
         if probabilities is None:
             joint = result.get('joint', [])
@@ -416,7 +427,7 @@ def create_app(settings=None, model=None):
         except (OSError, ValueError, KeyError) as exc:
             inspector = {'available': False, 'error': str(exc), 'fallback': 'python_source'}
         return {'ok': True, 'model': app.state.model.info, 'access': {'scope': 'development_only', 'approved_files': len(app.state.policy.entries), 'source': app.state.policy.source},
-                'inspection': inspector, 'limits': {'state_qubits': 12, 'state_operations': 10_000, 'inspection_operations': 100_000, 'inspection_qubits': 2048, 'nesting': 64, 'workers': 2, 'inspection_attempt_timeout_seconds': 10, 'state_timeout_seconds': settings.state_timeout, 'upload_bytes': settings.max_upload_bytes, 'interactive_bytes': INTERACTIVE_BYTES, 'python_fallback_bytes': PYTHON_FALLBACK_BYTES, 'large_feature_timeout_seconds': settings.large_feature_timeout, 'large_feature_memory_bytes': settings.large_feature_memory_bytes, 'large_feature_workers': 1, 'native_output_bytes': 64 * 1024 * 1024, 'metadata_preview_chars': 4096, 'window_size': WINDOW_SIZE, 'windows_cached': WINDOWS_CACHED}}
+                'inspection': inspector, 'limits': {'statevector_qubits': STATE_VECTOR_QUBITS, 'state_stabilizer_qubits': STATE_STABILIZER_QUBITS, 'state_mps_qubits': STATE_MPS_QUBITS, 'state_joint_qubits': STATE_JOINT_QUBITS, 'state_operations': STATE_OPERATIONS, 'state_memory_bytes': STATE_MEMORY_BYTES, 'state_workers': 1, 'inspection_operations': 100_000, 'inspection_qubits': 2048, 'nesting': 64, 'workers': 2, 'inspection_attempt_timeout_seconds': 10, 'state_timeout_seconds': settings.state_timeout, 'upload_bytes': settings.max_upload_bytes, 'interactive_bytes': INTERACTIVE_BYTES, 'python_fallback_bytes': PYTHON_FALLBACK_BYTES, 'large_feature_timeout_seconds': settings.large_feature_timeout, 'large_feature_memory_bytes': settings.large_feature_memory_bytes, 'large_feature_workers': 1, 'native_output_bytes': 64 * 1024 * 1024, 'metadata_preview_chars': 4096, 'window_size': WINDOW_SIZE, 'windows_cached': WINDOWS_CACHED}}
 
     @app.get('/api/examples')
     def examples():
@@ -601,22 +612,28 @@ def create_app(settings=None, model=None):
         return result
 
     @app.post('/api/circuits/{cid}/state')
-    def state(cid: str, request: Checkpoint):
+    def state(cid: str, request: StateCheckpoint):
         record, source = selected(cid, request)
         if isinstance(source, Path):
             raise HTTPException(422, 'State calculation is unavailable in large-file Full circuit mode; interactive inspection is limited to 32 MiB')
         boundary = record['parsed'].get('expanded_state_boundary') if request.step_kind == 'expanded' else record['parsed']['state_boundary']
         if boundary is not None and request.step >= boundary:
             raise HTTPException(422, f'State inspection stops before step {boundary}: measurement or reset')
-        if record['parsed']['num_qubits'] > 12:
-            raise HTTPException(422, 'Exact state calculation is limited to 12 qubits')
         metadata = checkpoint(record, request, source)
-        key = ('state', *cache_identity(record, source), request.pair)
+        selection = request.qubits if request.qubits is not None else request.pair
+        if request.qubits is None and record['parsed']['num_qubits'] == 1:
+            selection = (0,)
+        key = ('state-v2', *cache_identity(record, source), selection, request.method, request.include_joint, request.mps_max_bond, request.mps_cutoff)
         cached = app.state.results.get(key)
         if cached is not None:
             remember_cloud_ideal(cid, record, request, cached)
             return {**cached, **metadata, 'cached': True}
-        result, elapsed = compute('state', {'qasm': source, 'pair': list(request.pair)}, settings.state_timeout)
+        if not app.state.state_workers.acquire(blocking=False):
+            raise HTTPException(429, 'One state calculation is already running; try again shortly')
+        try:
+            result, elapsed = compute('state', {'qasm': source, 'qubits': list(selection), 'method': request.method, 'include_joint': request.include_joint, 'mps_max_bond': request.mps_max_bond, 'mps_cutoff': request.mps_cutoff}, settings.state_timeout)
+        finally:
+            app.state.state_workers.release()
         result.update({**metadata, 'provenance': provenance(record), 'calculation_seconds': elapsed, 'cached': False})
         app.state.results.put(key, result)
         remember_cloud_ideal(cid, record, request, result)

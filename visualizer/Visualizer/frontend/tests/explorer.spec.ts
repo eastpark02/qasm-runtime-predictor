@@ -4,7 +4,7 @@ test('upload → select → predict → state; navigation stays manual and cache
   const calls: string[] = [];
   page.on('request', r => {if (/\/(predict|state)$/.test(r.url())) calls.push(r.url());});
   await page.goto('/');
-  await expect(page.getByRole('heading', {name: 'Explore what happens between gates.'})).toBeVisible();
+  await expect(page.getByRole('heading', {name: 'Understand your circuit, gate by gate.'})).toBeVisible();
   // Seed the content cache under the example title; an upload must still show
   // the user's filename when it reuses that same parsed circuit.
   await page.getByRole('button', {name:'Open example', exact:true}).click();
@@ -21,7 +21,8 @@ test('upload → select → predict → state; navigation stays manual and cache
   expect(calls).toHaveLength(0);
   await page.getByRole('button', {name:'Predict runtime here'}).click();
   await expect(page.getByText(/^(Evaluated|Cached) · step 2 · threshold 256$/)).toBeVisible();
-  await page.getByRole('button', {name:'Calculate state here'}).click();
+  await page.getByLabel('State selection size').selectOption('2');
+  await page.getByRole('button', {name:'Calculate selected state'}).click();
   await expect(page.getByText('Pairwise concurrence', {exact:true})).toBeVisible();
   await expect(page.getByText('0.811', {exact:false}).first()).toBeVisible();
   expect(calls).toHaveLength(2);
@@ -30,7 +31,7 @@ test('upload → select → predict → state; navigation stays manual and cache
   await expect(page.getByText('Previous result — calculate to update', {exact:false})).toBeVisible();
   expect(calls).toHaveLength(2);
   await page.getByRole('button', {name:'Previous step', exact:true}).click();
-  await page.getByRole('button', {name:'Calculate state here'}).click();
+  await page.getByRole('button', {name:'Calculate selected state'}).click();
   await expect(page.getByText('Cached result', {exact:true})).toBeVisible();
   await page.getByRole('button', {name:'Predict runtime here'}).click();
   await expect(page.getByText('Cached · step 2 · threshold 256')).toBeVisible();
@@ -50,13 +51,14 @@ test('unknown content rejected and measurement boundary shown', async ({page, re
   await expect(page.getByText('C++ inspection · dev', {exact:true})).toBeVisible();
   await page.getByRole('button',{name:'Next step',exact:true}).click();
   await expect(page.locator('.instruction-detail code')).toContainText('ry(');
-  await page.getByRole('button',{name:'Calculate state here'}).click();
+  await page.getByLabel('State selection size').selectOption('2');
+  await page.getByRole('button',{name:'Calculate selected state'}).click();
   await expect(page.getByText('Pairwise concurrence', {exact:true})).toBeVisible();
   await expect(page.locator('.pair-detail strong').first()).toHaveText('0.000');
   await page.getByText('Inspect custom gate body', {exact:false}).click();
   await expect(page.locator('pre')).toContainText('gate pair');
   await page.getByLabel('Jump to step').fill('3');
-  await expect(page.getByRole('button',{name:'Calculate state here'})).toBeDisabled();
+  await expect(page.getByRole('button',{name:'Calculate selected state'})).toBeDisabled();
   await expect(page.getByText('State inspection stops before measurement/reset', {exact:false})).toBeVisible();
   const source = await (await request.get('/api/examples/bell/source')).text();
   expect(source).toContain('cx q[0],q[1]');
@@ -67,7 +69,7 @@ test('worker timeout is visible and controls recover', async ({page}) => {
   await page.getByRole('button',{name:'Open example'}).click();
   await page.getByRole('button',{name:'Next step',exact:true}).click();
   await page.route('**/api/circuits/*/state', async route => {await route.fulfill({status:408,contentType:'application/json',body:JSON.stringify({detail:'State exceeded 10 seconds; the worker was terminated'})});});
-  await page.getByRole('button',{name:'Calculate state here'}).click();
+  await page.getByRole('button',{name:'Calculate selected state'}).click();
   await expect(page.getByRole('alert')).toContainText('worker was terminated');
-  await expect(page.getByRole('button',{name:'Calculate state here'})).toBeEnabled();
+  await expect(page.getByRole('button',{name:'Calculate selected state'})).toBeEnabled();
 });

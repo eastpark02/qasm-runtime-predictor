@@ -5,3 +5,137 @@
 .quantum-connection{border:1px solid var(--line);border-radius:8px;padding:16px;margin:18px 0}.quantum-connection>div>strong{font-size:13px}.quantum-connection p{margin:7px 0}.quantum-connection form{display:flex;gap:12px;align-items:end;margin-top:12px}.quantum-connection label{display:flex;flex:1;flex-direction:column;gap:7px;font-size:11px;color:var(--muted)}.quantum-connection input[type=password]{width:100%;min-width:0;padding:10px;border:1px solid var(--line);border-radius:6px;background:transparent;color:var(--ink);font:inherit;min-height:38px}.quantum-connection form>.button{min-height:38px}.quantum-connection-status{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-top:12px;font-size:12px;color:var(--green)}@media(max-width:520px){.quantum-connection form{align-items:stretch;flex-direction:column}.quantum-connection-status{flex-wrap:wrap}}
 
 .quantum-scope {border:1px solid var(--line);border-radius:10px;padding:16px;margin:16px 0;display:flex;gap:18px;flex-wrap:wrap;align-items:center}.quantum-scope legend{font-weight:700}.quantum-scope label{display:flex;align-items:center;gap:8px}.quantum-scope .quantum-note{flex-basis:100%;margin:0}.quantum-scope input,.quantum-comparison-picker input{width:auto}.quantum-program{margin:16px 0;max-width:100%;overflow:hidden}.quantum-program pre{max-height:320px;overflow:auto;white-space:pre;font-size:12px;padding:12px;border:1px solid var(--line);border-radius:8px}.quantum-program code,.quantum-comparison code{overflow-wrap:anywhere}.quantum-comparison-picker{display:grid;gap:8px;margin:16px 0}.quantum-comparison-picker label{display:flex;align-items:center;gap:8px}.quantum-overlay{display:grid;gap:10px}.quantum-overlay-row{display:grid;grid-template-columns:minmax(60px,1fr) minmax(100px,3fr) minmax(160px,2fr);gap:12px;align-items:center;font-size:12px}.quantum-overlay-row code{overflow:hidden;text-overflow:ellipsis}.quantum-overlay-track{position:relative;height:22px;background:var(--line);border-radius:3px;overflow:hidden}.quantum-overlay-track>div{position:absolute;left:0;height:5px;min-width:0}.run-color-0{background:#589df5}.run-color-1{background:#f5a95b}.run-color-2{background:#ad7de8}.run-color-3{background:#51c9a7}.quantum-comparison table{min-width:760px}.quantum-job select{margin:8px;max-width:100%}@media(max-width:650px){.quantum-overlay-row{grid-template-columns:60px 1fr}.quantum-overlay-row>span{grid-column:1/-1}.quantum-scope{align-items:flex-start;gap:12px}.quantum-job-status{flex-wrap:wrap}}
+
+/* Cloud workflow: two clear setup groups, followed by the reviewed execution. */
+.quantum-body { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); column-gap:22px; }
+.quantum-body>* { grid-column:1/-1; min-width:0; }
+.quantum-body>.quantum-connection { grid-column:1; }
+.quantum-body>.quantum-scope { grid-column:2; }
+.quantum-panel .panel-heading { align-items:flex-start; }
+.quantum-panel h2 { font-size:21px; line-height:1.35; }
+.quantum-header-actions { gap:8px 14px; }
+.quantum-docs { min-height:44px; font-size:12px; text-decoration:underline; text-underline-offset:4px; }
+.quantum-body p { font-size:13px; }
+.quantum-body .quantum-note { font-size:12px!important; line-height:1.65; }
+.quantum-body>p:first-child { max-width:1000px; margin:0 0 4px; }
+.quantum-connection,.quantum-scope { margin:16px 0; padding:18px; background:var(--surface-subtle); border-radius:9px; }
+.quantum-connection h3 { font-size:14px; font-weight:600; }
+.quantum-connection form { flex-wrap:wrap; gap:10px; }
+.quantum-connection label { font-size:12px; font-weight:500; flex-basis:190px; }
+.quantum-panel :is(select,input[type=number],input[type=password]) { min-height:44px; border-color:var(--control-line); background:var(--surface); font-size:12px; }
+.quantum-panel input[type=password] { font-family:var(--mono); }
+.quantum-panel input:is([type=radio],[type=checkbox]) { accent-color:var(--green); width:17px; height:17px; flex-shrink:0; }
+.quantum-scope { gap:9px 20px; align-content:start; font-size:12px; }
+.quantum-scope legend { padding:0 6px; font-size:14px; font-weight:600; }
+.quantum-scope label { min-height:36px; }
+.quantum-scope .quantum-note { margin-top:4px; }
+.quantum-scope-help { flex-basis:100%; min-width:0; }
+.quantum-scope-help summary { color:var(--accent-ink); font-size:12px; font-weight:500; padding:8px 0; min-height:36px; }
+.quantum-checkpoint { padding:13px 0 17px; margin-top:4px; border-bottom:1px solid var(--line); font-size:12px; }
+.quantum-checkpoint strong { font-weight:600; }
+.quantum-controls { grid-template-columns:minmax(160px,1fr) minmax(200px,1.6fr) 95px auto; margin-top:18px; gap:12px; }
+.quantum-controls label,.quantum-history-picker { font-size:12px; font-weight:500; }
+.quantum-controls>.button { height:auto; }
+.quantum-runtime-options { grid-template-columns:minmax(0,1fr) minmax(0,1fr); padding:16px; margin-top:6px; border:1px solid var(--line); border-radius:8px; }
+.quantum-runtime-options>.quantum-note { grid-column:1/-1; margin:0; }
+.quantum-wallet { font-size:12px; }
+.quantum-link { color:var(--accent-ink); font-size:12px; min-height:32px; line-height:1.5; }
+.quantum-device { background:var(--surface-subtle); padding:17px; }
+.quantum-device>strong { font-size:14px; }
+.quantum-device>code { font-size:11px; }
+.quantum-device>div { font-size:12px; }
+.quantum-quote { background:var(--surface-subtle); border-color:var(--control-line); }
+.quantum-money span { font-size:12px; }
+.quantum-money strong { font-size:26px; font-weight:600; font-variant-numeric:tabular-nums; }
+.quantum-ack { font-size:12px; }
+.quantum-warning { color:#755016; }
+.quantum-history { margin-top:22px; }
+.quantum-history-title h3,.quantum-history>h3 { font-size:16px; font-weight:600; letter-spacing:-.2px; }
+.quantum-history>.quantum-note { margin:7px 0 12px; }
+.quantum-job-status { gap:10px; flex-wrap:wrap; }
+.quantum-job-status>strong { color:var(--accent-ink); font-weight:600; margin-right:auto; letter-spacing:.7px; }
+.quantum-job dl { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); column-gap:24px; margin:18px 0; font-size:12px; }
+.quantum-job dl>div { grid-template-columns:135px minmax(0,1fr); padding:10px 0; border-bottom:1px solid var(--line); }
+.quantum-job dt { font-weight:500; }
+.quantum-job dd code { font-size:11px; }
+.quantum-job h4 { font-size:15px; font-weight:600; margin:24px 0 10px; }
+.quantum-program>strong { font-size:14px; font-weight:600; }
+.quantum-program summary { min-height:40px; padding:8px 0; font-size:12px; color:var(--accent-ink); font-weight:500; }
+.quantum-program pre { background:var(--surface); line-height:1.6; }
+.quantum-counts table { font-size:12px; }
+.quantum-counts td,.quantum-counts th { font-size:12px; line-height:1.6; }
+.quantum-counts td code { font-size:11px; }
+.quantum-comparison table { table-layout:fixed; min-width:920px; }
+.quantum-comparison td,.quantum-comparison th { overflow-wrap:anywhere; }
+.quantum-comparison td code { white-space:pre-wrap; }
+.quantum-comparison-picker { gap:7px; }
+.quantum-comparison-picker label { font-size:12px; line-height:1.6; min-height:40px; padding:7px 10px; border:1px solid var(--line); border-radius:6px; }
+.quantum-comparison-picker label:has(input:checked) { background:var(--surface-subtle); border-color:var(--control-line); }
+.quantum-histogram { background:var(--surface-subtle); }
+.quantum-histogram-legend,.quantum-histogram-row { font-size:11px; }
+.quantum-histogram-row { grid-template-columns:minmax(48px,110px) minmax(0,1fr); }
+.quantum-overlay-row>span { line-height:1.6; }
+.run-color-0 { background:#216bb8; }
+.run-color-1 { background:#986015; }
+.run-color-2 { background:#7950ad; }
+.run-color-3 { background:#13755d; }
+[data-theme="dark"] .run-color-0 { background:#589df5; }
+[data-theme="dark"] .run-color-1 { background:#f5a95b; }
+[data-theme="dark"] .run-color-2 { background:#ad7de8; }
+[data-theme="dark"] .run-color-3 { background:#51c9a7; }
+.quantum-histogram-legend span:before { background:#13755d; }
+.quantum-histogram-legend span:nth-child(2):before { background:#7950ad; }
+.quantum-histogram-row progress { color:#13755d; accent-color:#13755d; }
+.quantum-histogram-row progress::-webkit-progress-value { background:#13755d; }
+.quantum-histogram-row progress::-moz-progress-bar { background:#13755d; }
+.quantum-histogram-row .quantum-ideal-bar progress { color:#7950ad; accent-color:#7950ad; }
+.quantum-ideal-bar progress::-webkit-progress-value { background:#7950ad; }
+.quantum-ideal-bar progress::-moz-progress-bar { background:#7950ad; }
+[data-theme="dark"] .quantum-histogram-legend span:before { background:#63cdaa; }
+[data-theme="dark"] .quantum-histogram-legend span:nth-child(2):before { background:#b59bdc; }
+[data-theme="dark"] .quantum-histogram-row progress { color:#63cdaa; accent-color:#63cdaa; }
+[data-theme="dark"] .quantum-histogram-row progress::-webkit-progress-value { background:#63cdaa; }
+[data-theme="dark"] .quantum-histogram-row progress::-moz-progress-bar { background:#63cdaa; }
+[data-theme="dark"] .quantum-histogram-row .quantum-ideal-bar progress { color:#b59bdc; accent-color:#b59bdc; }
+[data-theme="dark"] .quantum-ideal-bar progress::-webkit-progress-value { background:#b59bdc; }
+[data-theme="dark"] .quantum-ideal-bar progress::-moz-progress-bar { background:#b59bdc; }
+
+@media(max-width:1100px) {
+  .quantum-controls { grid-template-columns:minmax(0,1fr) minmax(0,1fr); }
+  .quantum-job dl { grid-template-columns:1fr; }
+  .quantum-runtime-options { grid-template-columns:minmax(0,1fr) minmax(0,1fr); }
+}
+@media(max-width:800px) {
+  .quantum-body { grid-template-columns:1fr; }
+  .quantum-body>.quantum-connection,.quantum-body>.quantum-scope { grid-column:1; }
+  .quantum-body>.quantum-scope { margin-top:4px; }
+}
+@media(max-width:520px) {
+  .quantum-body { padding:16px 16px 22px; }
+  .quantum-panel h2 { font-size:20px; }
+  .quantum-panel .panel-heading { padding-left:16px; padding-right:16px; }
+  .quantum-header-actions { justify-content:flex-start; width:100%; }
+  .quantum-connection,.quantum-scope { padding:14px; }
+  .quantum-connection form { flex-direction:column; align-items:stretch; }
+  .quantum-connection label { flex-basis:auto; }
+  .quantum-controls { grid-template-columns:minmax(0,1fr) 100px; }
+  .quantum-runtime-options { grid-template-columns:1fr; padding:14px; }
+  .quantum-runtime-options>label { grid-column:1/-1; }
+  .quantum-checkpoint { gap:12px; align-items:stretch; }
+  .quantum-checkpoint>.button { width:100%; white-space:normal; }
+  .quantum-wallet { gap:9px; }
+  .quantum-wallet>.quantum-link { margin-left:26px; }
+  .quantum-quote { padding:14px; }
+  .quantum-quote>.button { max-width:100%; white-space:normal; }
+  .quantum-money { grid-template-columns:1fr; gap:12px; }
+  .quantum-money>div { flex-direction:row; align-items:baseline; justify-content:space-between; gap:12px; }
+  .quantum-money strong { font-size:23px; }
+  .quantum-history-title { align-items:flex-start; flex-wrap:wrap; gap:5px; }
+  .quantum-job-status { align-items:stretch; }
+  .quantum-job-status>strong { flex-basis:100%; padding-bottom:6px; }
+  .quantum-job-status>.button { max-width:100%; white-space:normal; }
+  .quantum-job dl>div { grid-template-columns:100px minmax(0,1fr); gap:12px; }
+  .quantum-job select { display:block; margin:8px 0; }
+  .quantum-histogram { padding:12px; }
+  .quantum-histogram-row { grid-template-columns:60px minmax(0,1fr); gap:8px; }
+}

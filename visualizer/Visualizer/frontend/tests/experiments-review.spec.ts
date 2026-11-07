@@ -65,7 +65,7 @@ test('checker: runtime option changes invalidate reviewed quote and matching ide
   await page.getByRole('button',{name:'Get cost estimate',exact:true}).click();
   expect(states).toEqual([]);
   await page.getByRole('button',{name:'Calculate matching ideal',exact:true}).click();
-  expect(states).toEqual([{step:2,step_kind:'source'}]);
+  expect(states).toEqual([{step:2,step_kind:'source',include_joint:true}]);
   await page.getByLabel('Cloud runtime profile').selectOption('mps256');
   await expect(page.locator('.quantum-quote')).toHaveCount(0);
   await page.getByLabel('Cloud sampling seed').fill('0');

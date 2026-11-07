@@ -67,68 +67,8 @@ def _full_file_features(payload):
 
 
 def _state(payload):
-    import numpy as np
-    from qiskit.quantum_info import Statevector, partial_trace, entropy, concurrence
-    from .circuits import load_qiskit, source_parts
-
-    source_parts(payload['qasm'])  # Validate includes even for direct internal calls.
-    circuit = load_qiskit(payload['qasm'])
-    if circuit.num_qubits > 12:
-        raise ValueError("Exact state calculation is limited to 12 qubits. Circuit inspection and runtime prediction remain available.")
-    pair = payload.get('pair', [0, 1])
-    if len(pair) != 2 or pair[0] == pair[1] or any(q < 0 or q >= circuit.num_qubits for q in pair):
-        if circuit.num_qubits > 1:
-            raise ValueError("Choose two different qubits from this circuit")
-    if circuit.num_qubits == 0:
-        raise ValueError("State calculation requires at least one qubit")
-    from qiskit.circuit.library.standard_gates import get_standard_gate_name_mapping
-    standard_names = set(get_standard_gate_name_mapping())
-    count = 0
-    def expanded(operation, depth=0):
-        nonlocal count
-        if depth > 64:
-            raise ValueError("Custom-gate nesting exceeds 64 levels")
-        if operation.name in {'barrier'}:
-            return
-        if operation.name in {'measure', 'reset', 'if_else', 'for_loop', 'while_loop', 'switch_case'}:
-            raise ValueError("State calculation stops before measurement, reset, or classical branching")
-        # Standard gates are leaves; only expand user-defined composite gates.
-        if operation.name in standard_names:
-            count += 1
-        elif operation.definition is not None:
-            for inst in operation.definition.data:
-                expanded(inst.operation, depth + 1)
-        else:
-            count += 1
-        if count > 10_000:
-            raise ValueError("Exact state calculation is limited to 10,000 expanded operations")
-    for inst in circuit.data:
-        expanded(inst.operation)
-    state = Statevector.from_int(0, 2 ** circuit.num_qubits)
-    for inst in circuit.data:
-        if inst.operation.name != 'barrier':
-            state = state.evolve(inst.operation, qargs=[circuit.find_bit(q).index for q in inst.qubits])
-    qubits = []
-    for q in range(circuit.num_qubits):
-        rho = partial_trace(state, [i for i in range(circuit.num_qubits) if i != q])
-        data = rho.data
-        vector = [float(2 * data[0, 1].real), float(-2 * data[0, 1].imag), float((data[0, 0] - data[1, 1]).real)]
-        qubits.append({"index": q, "p0": float(data[0, 0].real), "p1": float(data[1, 1].real),
-                       "bloch": vector, "length": float(np.linalg.norm(vector)), "entropy": float(entropy(rho))})
-    probs = state.probabilities_dict()
-    joint = sorted([{"bits": key, "probability": float(value), "amplitude_real": float(state.data[int(key, 2)].real),
-                     "amplitude_imag": float(state.data[int(key, 2)].imag),
-                     "phase": float(np.angle(state.data[int(key, 2)]))} for key, value in probs.items() if value > 1e-12],
-                   key=lambda r: r['probability'], reverse=True)
-    pair_result = None
-    if circuit.num_qubits > 1:
-        reduced = partial_trace(state, [i for i in range(circuit.num_qubits) if i not in pair])
-        from qiskit.quantum_info import Pauli
-        correlations = {basis: float(reduced.expectation_value(Pauli(basis)).real) for basis in ['XX', 'YY', 'ZZ']}
-        pair_result = {"qubits": pair, "concurrence": float(concurrence(reduced)), "correlations": correlations}
-    return {"qubits": qubits, "pair": pair_result, "joint": joint[:64], "joint_total": len(joint),
-            "ideal_probabilities": {str(key): float(value) for key,value in probs.items()},
-            "expanded_operations": count, "assumptions": "Ideal noiseless pure global state, initialized to all zeros. Bitstrings are q[n-1]…q[0]. Entropy measures each qubit versus the rest; pairwise concurrence does not capture all multipartite entanglement."}
+    from .selected_state import calculate_selected
+    return calculate_selected(payload)
 
 
 def _entry(connection, action, payload):
@@ -137,7 +77,19 @@ def _entry(connection, action, payload):
             from .circuits import parse
             result = parse(payload['qasm'])
         elif action == 'state':
-            result = _state(payload)
+            # Native libraries reserve thread stacks on import. Establish this
+            # inside the spawned worker, before numpy/Qiskit/Aer and the memory
+            # cap; do not depend on the server launcher's environment.
+            import os
+            for variable in ('OPENBLAS_NUM_THREADS', 'OMP_NUM_THREADS', 'MKL_NUM_THREADS',
+                             'NUMEXPR_NUM_THREADS', 'VECLIB_MAXIMUM_THREADS', 'BLIS_NUM_THREADS'):
+                os.environ[variable] = '1'
+            from .process_guard import enter_resource_job
+            from .limits import STATE_MEMORY_BYTES
+            resource_job = enter_resource_job(STATE_MEMORY_BYTES)
+            from threadpoolctl import threadpool_limits
+            with threadpool_limits(limits=1):
+                result = _state(payload)
         elif action == 'cloud_prepare':
             from .qbraid_service import prepare_program
             result = prepare_program(payload['record'], payload['step'], payload.get('step_kind', 'source'), payload.get('scope', 'checkpoint'), payload.get('acknowledge_initial_state', False))

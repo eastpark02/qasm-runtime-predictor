@@ -1,22 +1,40 @@
-import {useState} from 'react';
+import {useEffect, useRef, useState} from 'react';
 import type {QubitState} from './types';
+import './bloch3d.css';
 
 export function BlochSphere({qubit}: {qubit: QubitState}) {
-  const [angle, setAngle] = useState(.65);
-  const project = (x: number, y: number, z: number) => [90 + 57 * (x * Math.cos(angle) - y * Math.sin(angle)), 87 + 24 * (x * Math.sin(angle) + y * Math.cos(angle)) - 57 * z];
-  const point = project(qubit.bloch[0], qubit.bloch[1], qubit.bloch[2]);
-  const x = project(1.22, 0, 0), y = project(0, 1.22, 0), z = project(0, 0, 1.2);
-  return <div className="bloch-plot">
-    <svg viewBox="0 0 180 177" role="img" aria-label={`Qubit ${qubit.index} Bloch vector x ${qubit.bloch[0].toFixed(3)}, y ${qubit.bloch[1].toFixed(3)}, z ${qubit.bloch[2].toFixed(3)}. Length ${qubit.length.toFixed(3)}`}>
-      <defs><radialGradient id={`sphere-${qubit.index}`} cx="35%" cy="28%" r="80%"><stop offset="0%" stopColor="var(--sphere-light, #eef9f6)"/><stop offset="100%" stopColor="var(--sphere-shade, #c7e5dc)" stopOpacity=".3"/></radialGradient></defs>
-      <circle cx="90" cy="87" r="57" fill={`url(#sphere-${qubit.index})`} className="sphere-outline"/>
-      <ellipse cx="90" cy="87" rx="57" ry="24" className="sphere-grid"/>
-      <ellipse cx="90" cy="87" rx="24" ry="57" className="sphere-grid"/>
-      {[x, y, z].map((p, i) => <g key={i}><line x1={180 - p[0]} y1={174 - p[1]} x2={p[0]} y2={p[1]} className="sphere-axis"/><text x={p[0] + 5} y={p[1] + 3} className="axis-label">{['x', 'y', 'z'][i]}</text></g>)}
-      <text x="96" y="20" className="axis-label">|0⟩</text><text x="96" y="156" className="axis-label">|1⟩</text>
-      <line x1="90" y1="87" x2={point[0]} y2={point[1]} className="state-vector"/>
-      <circle cx={point[0]} cy={point[1]} r="4.5" className="vector-tip"/>
-    </svg>
-    <label className="sphere-control">View angle<input aria-label={`Rotate view of qubit ${qubit.index}`} type="range" min="0" max="6.28" step=".05" value={angle} onChange={e => setAngle(Number(e.target.value))}/></label>
+  const viewport = useRef<HTMLDivElement>(null), canvas = useRef<HTMLCanvasElement>(null), labels = useRef<HTMLDivElement>(null);
+  const runtime = useRef<ReturnType<typeof import('./bloch3d').createBlochView> | null>(null);
+  const latest = useRef(qubit); latest.current = qubit;
+  const [mode, setMode] = useState<'loading' | '3d' | 'fallback'>('loading');
+  useEffect(() => {
+    let disposed = false;
+    let view: typeof runtime.current = null;
+    void import('./bloch3d').then(({createBlochView}) => {
+      if (disposed) return;
+      view = createBlochView(viewport.current!, canvas.current!, labels.current!, setMode);
+      runtime.current = view; view.update(latest.current);
+    }).catch(() => { if (!disposed) setMode('fallback'); });
+    return () => { disposed = true; view?.dispose(); runtime.current = null; };
+  }, []);
+  useEffect(() => { runtime.current?.update(qubit); }, [qubit]);
+  const fmt = (value: number) => (Math.abs(value) < 1e-10 ? 0 : value).toFixed(3);
+  return <div className="bloch-plot bloch-studio">
+    <div className="bloch-viewport" ref={viewport} tabIndex={0} role="img"
+      aria-label={`Qubit ${qubit.index} interactive Bloch sphere. Vector x ${fmt(qubit.bloch[0])}, y ${fmt(qubit.bloch[1])}, z ${fmt(qubit.bloch[2])}. Length ${fmt(qubit.length)}. Drag or use arrow keys to rotate; plus and minus to zoom; R to reset.`}>
+      <canvas ref={canvas} aria-hidden="true" className={mode === '3d' ? '' : 'bloch-hidden'}/>
+      <div ref={labels} className={`bloch-axis-labels ${mode === '3d' ? '' : 'bloch-hidden'}`} aria-hidden="true"/>
+      {mode !== '3d' && <svg className="bloch-fallback" viewBox="0 0 260 220" aria-hidden="true">
+        <circle cx="130" cy="105" r="78" fill="#12262d" stroke="#52717b"/>
+        <ellipse cx="130" cy="105" rx="78" ry="24" fill="none" stroke="#52717b"/>
+        <path d="M130 19V191M44 105H216" stroke="#52717b"/>
+        <path d={`M130 105L${130 + qubit.bloch[0] * 78} ${105 - qubit.bloch[2] * 78}`} stroke="#81f1c1" strokeWidth="3"/>
+        <circle cx={130 + qubit.bloch[0] * 78} cy={105 - qubit.bloch[2] * 78} r="4" fill="#81f1c1"/>
+        <text x="130" y="13" textAnchor="middle">+Z |0⟩</text>
+        <text x="130" y="211" textAnchor="middle">XZ projection · Y = {fmt(qubit.bloch[1])}</text>
+      </svg>}
+    </div>
+    <div className="bloch-tools"><span>{mode === '3d' ? 'Drag to orbit · arrows to rotate' : mode === 'loading' ? 'Loading 3D · exact XZ projection' : 'Exact XZ projection · 3D unavailable'}</span><button type="button" aria-label={`Reset view of qubit ${qubit.index}`} onClick={() => runtime.current?.reset()} disabled={mode !== '3d'}>Reset</button></div>
+    <div className="bloch-coordinates" aria-label="Bloch coordinates">x {fmt(qubit.bloch[0])} · y {fmt(qubit.bloch[1])} · z {fmt(qubit.bloch[2])}</div>
   </div>;
 }
