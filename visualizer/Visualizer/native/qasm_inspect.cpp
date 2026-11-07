@@ -122,18 +122,16 @@ struct Inspector {
   void run(){std::vector<Call> calls;Call c;while(next(c,!calls.empty())){calls.push_back(c);if(calls.size()>100000)fail("Source inspection limit");}
     if(!header)fail("Missing OPENQASM header");for(const auto& c:calls){++source_step;top(c);}
   }
-  // Broadcast width and operand validity, without expanding or retaining records.
-  size_t width_of(const Call& c){size_t width=1;std::vector<size_t> sizes;for(const auto& a:c.args){sizes.push_back(resolve(a,true).size());width=std::max(width,sizes.back());}
-    size_t quantum=sizes.size();for(const auto& a:c.classical){sizes.push_back(resolve(a,false).size());width=std::max(width,sizes.back());}
-    for(size_t i=0;i<sizes.size();++i)if(sizes[i]!=1&&sizes[i]!=width)fail(i<quantum?"Mismatched broadcast widths":"Mismatched classical broadcast widths");
-    return c.name=="barrier"?1:width;}
-  // Windowed index: every top-level call is parsed (no statement limit) but not
-  // expanded or stored. Declarations must precede calls, so a window can be
+  // Windowed index: every top-level call is parsed (no statement limit) and
+  // validated through top() exactly as whole-file inspection does, but its
+  // records are discarded. Declarations must precede calls, so a window can be
   // inspected from its first statement after re-reading the declarations.
   static constexpr size_t window_size=100000;
-  size_t total=0,state_boundary=0;std::vector<size_t> window_offsets;std::vector<unsigned long long> window_ops;
-  void index(){Call c;unsigned long long ops=0;while(next(c,total>0)){if(total%window_size==0){window_offsets.push_back(c.start);window_ops.push_back(ops);}
-      ++total;ops+=width_of(c);if(!state_boundary&&(c.name=="measure"||c.name=="reset"))state_boundary=total;}
+  size_t total=0,state_boundary=0;unsigned long long total_ops=0;std::vector<size_t> window_offsets;std::vector<unsigned long long> window_ops;
+  void index(){Call c;while(next(c,total>0)){if(total%window_size==0){window_offsets.push_back(c.start);window_ops.push_back(total_ops);}
+      ++total;source_step=int(total);top(c);total_ops+=source_widths.back();
+      records.clear();source_widths.clear();source_names.clear();source_parameters.clear();source_qubits.clear();source_clbits.clear();record_budget=0;
+      if(!state_boundary&&(c.name=="measure"||c.name=="reset"))state_boundary=total;}
     if(!header)fail("Missing OPENQASM header");}
   // One window: declarations/definitions as usual, then exactly `count` calls
   // from an absolute statement offset, expanded with global source steps.
@@ -179,7 +177,7 @@ int main(int argc,char** argv){try{std::string mode=argc>1?argv[1]:"";
     inspection::Inspector parser(inspection::load(argv[2],argc==4?inspection::number(argv[3],"max_bytes"):256*1024*1024));parser.index();
     BoundedOutput buffer;std::ostream out(&buffer);out.exceptions(std::ios::badbit|std::ios::failbit);inspection::declarations(out,parser);
     out<<",\"total_statements\":"<<parser.total<<",\"window_size\":"<<parser.window_size<<",\"window_offsets\":";inspection::numbers(out,parser.window_offsets);
-    out<<",\"window_op_offsets\":";inspection::numbers(out,parser.window_ops);
+    out<<",\"window_op_offsets\":";inspection::numbers(out,parser.window_ops);out<<",\"total_instances\":"<<parser.total_ops;
     // Same equal-width bucket arithmetic as GET /overview with buckets=200.
     std::vector<size_t> buckets;size_t width=std::max<size_t>(1,(parser.total+199)/200);for(size_t start=0;start<parser.total;start+=width)buckets.push_back(std::min(width,parser.total-start));
     out<<",\"bucket_counts\":";inspection::numbers(out,buckets);out<<",\"state_boundary\":";if(parser.state_boundary)out<<parser.state_boundary;else out<<"null";

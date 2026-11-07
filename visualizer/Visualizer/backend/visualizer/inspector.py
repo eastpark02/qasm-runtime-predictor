@@ -164,8 +164,9 @@ def native_parse(source, root, expected_fingerprint=None, *, max_bytes=DEFAULT_U
 def native_index(source, root, expected_fingerprint=None, *, max_bytes=DEFAULT_UPLOAD_BYTES):
     """Windowed inspection index for sources above the 100,000-statement limit.
 
-    Declarations and definitions are parsed and validated exactly as in
-    whole-file inspection; every top-level call is parsed but not expanded.
+    Declarations, definitions and every top-level call are parsed and
+    validated exactly as in whole-file inspection; expanded records are
+    discarded instead of retained.
     Windows of WINDOW_SIZE statements are inspected later by native_window().
     """
     validate_upload_bytes(max_bytes)
@@ -174,7 +175,7 @@ def native_index(source, root, expected_fingerprint=None, *, max_bytes=DEFAULT_U
     index = _invoke(executable, source, ['--index'], deadline, max_bytes)
     total, offsets = index['total_statements'], index['window_offsets']
     if (index['window_size'] != WINDOW_SIZE or total < 1 or len(offsets) != -(-total // WINDOW_SIZE)
-            or len(index['window_op_offsets']) != len(offsets)):
+            or len(index['window_op_offsets']) != len(offsets) or not isinstance(index.get('total_instances'), int)):
         raise ValueError('Native windowed index is inconsistent')
     # Character offsets of each window's first statement (identical for ASCII).
     if source.isascii():
@@ -204,7 +205,7 @@ def native_index(source, root, expected_fingerprint=None, *, max_bytes=DEFAULT_U
             'inspection_backend': 'app_owned_cpp_windowed', 'inspector_fingerprint': build['binary_sha256'],
             'fallback_reason': None, 'warnings': [],
             # Internal: not serialized by summary().
-            '_window_chars': chars, '_window_op_offsets': index['window_op_offsets'],
+            '_window_chars': chars, '_window_op_offsets': index['window_op_offsets'], '_total_instances': index['total_instances'],
             '_definitions': definitions, '_newlines': newlines}
 
 

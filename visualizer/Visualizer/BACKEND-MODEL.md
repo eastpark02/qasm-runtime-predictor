@@ -202,12 +202,18 @@ hash authorization is still required before any parsing and every computation.
 
 When whole-file native inspection fails only because a source of at most 32 MiB
 has more than 100,000 top-level statements, upload runs
-`qasm_inspect --index file [max_bytes]` in the same worker slot with the same
-10-second deadline. It parses the header, declarations and gate definitions as
-usual, parses (but does not expand or store) every call, and enforces the qubit
-and register caps and declarations-before-calls. It reports `total_statements`,
-`window_offsets` (absolute byte offset of every 100,000th statement),
-`window_op_offsets`, `bucket_counts`, `state_boundary` and `has_definitions`.
+`qasm_inspect --index file [max_bytes]` in the same worker slot with its own
+10-second attempt deadline (an upload can therefore spend up to 10 s in the
+failed whole-file attempt plus 10 s indexing). It parses the header,
+declarations and gate definitions as usual, then validates every call through
+the same expansion as whole-file inspection (gate signatures, arity, parameter
+evaluation, operands, broadcast and measurement widths) and discards the
+records, so it rejects exactly what whole-file inspection rejects apart from the
+100,000-statement limit and the aggregate 64 MiB record/output budget (both
+still apply inside each window). It enforces the qubit and register caps and
+declarations-before-calls, and reports `total_statements`, `window_offsets`
+(absolute byte offset of every 100,000th statement), `window_op_offsets`,
+`total_instances`, `bucket_counts`, `state_boundary` and `has_definitions`.
 If indexing fails, the previous fallback chain is unchanged.
 
 The record has `inspection_mode=windowed`, `inspection_backend=app_owned_cpp_windowed`,
@@ -219,18 +225,28 @@ on demand. A window re-reads declarations, seeks to the statement offset and
 expands exactly `count` calls with global `source_step` numbers and absolute
 offsets; the same Python alignment as whole-file inspection produces the step
 records. Global `op_start/op_end` come from the index; `expanded_start/end` are
-`null`. Four inspected windows are retained per circuit; one window inspection
-per circuit runs at a time and uses one of the two calculation workers (429 when
-both are busy). The 100,000-record and 64 MiB output caps still apply inside a
+`null`. Four inspected windows are retained per circuit and the circuit cache
+holds four circuits, so at most 16 windows are retained in total. One cached
+window of 100,000 single-gate statements measured about 155 MB of Python step
+records (about 370 MB peak while aligning), so the worst case is roughly 2.5 GB.
+The per-circuit lock covers only the cache lookup; each window inspection takes
+one of the two calculation workers without waiting (429 when both are busy),
+and a request for a window that is already being inspected waits for that
+inspection (408 after 20 seconds) instead of starting another. The 100,000-record and 64 MiB output caps still apply inside a
 window, so a window whose custom calls or broadcasts expand past 100,000 records
 returns an explicit 422.
 
 `/instructions` and `step_kind=expanded` checkpoints return 422. `/overview`
 derives statement buckets from the index total. Source step N uses the exact
 source through statement N, built by the same prefix code as other modes;
-step `total_steps` is the exact original source. Stepper (10,000 gates), state
-(12 qubits/10,000 operations) and authorization rechecks are unchanged; cloud
-execution is rejected. Health `limits` reports `window_size` and `windows_cached`.
+step `total_steps` is the exact original source and needs no window
+inspection: its `source_origin` is `null` and the imported instance count comes
+from the index `total_instances`, so full-circuit features, prediction and SHAP
+work even when the last window exceeds the record limit. Stepper (10,000 gates),
+state (10,000 operations; 22 qubits statevector, 128 MPS, 512 stabilizer, 12
+joint; see health `limits`) and authorization rechecks are unchanged; cloud
+execution is rejected. Health `limits` reports `window_size`, `windows_cached`
+and `windows_cached_scope=per_circuit`.
 
 ## Large uploads and exact full-source inference
 

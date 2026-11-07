@@ -200,9 +200,11 @@ Files up to 32 MiB with more than 100,000 top-level statements open in
 indexes every statement once, then inspects windows of 100,000 statements on
 demand (at most four retained per circuit). Only source-step navigation is
 available; features, prediction and SHAP use the exact source through the
-selected statement. Stepper, state (12 qubits/10,000 operations) and window
-record limits (100,000 expanded records) are unchanged, and cloud execution is
-unavailable. See [windowed inspection](BACKEND-MODEL.md#windowed-native-inspection).
+selected statement (the exact full source at the last statement, without any
+window inspection). Every statement is validated when the file is indexed.
+Stepper (10,000 gates), state (10,000 operations; 22 qubits statevector, 128
+MPS, 512 stabilizer, 12 joint) and window record limits (100,000 expanded
+records) are unchanged, and cloud execution is unavailable. See [windowed inspection](BACKEND-MODEL.md#windowed-native-inspection).
 
 Files above 32 MiB, and files above 5 MiB whose interactive inspection fails,
 open in **Full circuit mode**. The original file is retained on disk; it does not

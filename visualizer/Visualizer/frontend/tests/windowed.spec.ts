@@ -14,7 +14,7 @@ test('windowed inspection jumps between statement windows and keeps stale/cached
     if (path === '/api/importance') return route.fulfill({json:{available:false}});
     if (path === '/api/qbraid/profiles') return route.fulfill({json:{profiles:[]}});
     if (path === '/api/qbraid/jobs') return route.fulfill({json:{jobs:[]}});
-    if (path === '/api/circuits') return route.fulfill({json:{id:'windowed-fixture',name:'windowed.qasm',origin:'synthetic',num_qubits:4,num_clbits:0,total_steps:TOTAL,total_instructions:null,state_boundary:TOTAL,qubit_labels:['q[0]','q[1]','q[2]','q[3]'],parse_seconds:.6,inspection_mode:'windowed',inspection_backend:'app_owned_cpp_windowed',window_size:SIZE,windows,warnings:['Windowed native inspection; only source-step navigation.']}});
+    if (path === '/api/circuits') return route.fulfill({json:{id:'windowed-fixture',name:'windowed.qasm',origin:'synthetic',num_qubits:4,num_clbits:0,total_steps:TOTAL,total_instructions:null,state_boundary:TOTAL,qubit_labels:['q[0]','q[1]','q[2]','q[3]'],parse_seconds:.6,inspection_mode:'windowed',inspection_backend:'app_owned_cpp_windowed',window_size:SIZE,windows,fallback_reason:'ValueError: Source inspection limit at byte 1400000\n',warnings:['Windowed native inspection; only source-step navigation.','Cloud execution is unavailable in windowed mode.','Prefix runtime estimates are experimental.','No model prediction or state calculation has been run.']}});
     const action = path.split('/').at(-1)!;
     if (action === 'steps') {
       const offset = Number(url.searchParams.get('offset')), limit = Number(url.searchParams.get('limit'));
@@ -40,6 +40,8 @@ test('windowed inspection jumps between statement windows and keeps stale/cached
   await expect(page.getByRole('heading',{name:'windowed.qasm',exact:true})).toBeVisible();
   await expect(page.locator('.inspection-badge')).toHaveText('C++ windowed');
   await expect(page.locator('.circuit-stats')).toContainText('windowed native inspection · 250,000 statements');
+  await expect(page.locator('.inspection-fallback')).toHaveText('Whole-file inspection stopped at its 100,000-statement limit (ValueError: Source inspection limit at byte 1400000); statements are inspected on demand in windows of 100,000.');
+  await expect(page.getByRole('list',{name:'Windowed inspection limits'}).locator('li')).toHaveText(['Windowed native inspection; only source-step navigation.','Cloud execution is unavailable in windowed mode.']);
   const picker = page.getByLabel('Statement window',{exact:true});
   await expect(picker.locator('option')).toHaveText(['Statements 1–100,000','Statements 100,001–200,000','Statements 200,001–250,000']);
   await expect(picker).toHaveValue('0');
@@ -47,19 +49,25 @@ test('windowed inspection jumps between statement windows and keeps stale/cached
 
   // Keyboard: focus the control and move to the second window.
   await picker.focus();
+  const beforeJump = stepRequests.length;
   await picker.selectOption('1');
   await expect(page.getByLabel('Jump to step',{exact:true})).toHaveValue('100001');
   await expect.poll(() => stepRequests.some(r => r.offset === 100000 && r.limit === 200)).toBe(true);
   await expect(page.getByRole('button',{name:'Step 100001: H on q1',exact:true})).toBeVisible();
+  // A jump fetches only the selected window: no padding page or nearby trace
+  // reaches back into statements 1–100,000.
+  expect(stepRequests.slice(beforeJump).every(r => r.offset >= 100000 && r.offset + r.limit <= 200000)).toBe(true);
   await expect(page.locator('.instruction-detail')).toContainText('SOURCE STEP 100001');
 
   await page.getByRole('button',{name:'Predict runtime here',exact:true}).click();
   await expect(page.getByText('Evaluated · step 100001 · threshold 256',{exact:true})).toBeVisible();
   await expect(page.locator('.shap-row')).toHaveCount(1);
 
+  const beforeLast = stepRequests.length;
   await picker.selectOption('2');
   await expect(page.getByLabel('Jump to step',{exact:true})).toHaveValue('200001');
   await expect.poll(() => stepRequests.some(r => r.offset === 200000 && r.limit === 200)).toBe(true);
+  expect(stepRequests.slice(beforeLast).every(r => r.offset >= 200000)).toBe(true);
   await expect(page.getByText('Run manually at this checkpoint',{exact:true})).toBeVisible();
   await expect(page.getByText(/Step 100001 · source · threshold 256 · previous checkpoint/)).toBeVisible();
 

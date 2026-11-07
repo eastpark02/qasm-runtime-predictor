@@ -186,7 +186,7 @@ def test_upload_opens_windowed_mode(served, big):
     assert 'Source inspection limit' in summary['fallback_reason']
     assert any(w.startswith('Windowed native inspection') for w in summary['warnings'])
     limits = client.get('/api/health').json()['limits']
-    assert limits['window_size'] == WINDOW and limits['windows_cached'] == 4
+    assert limits['window_size'] == WINDOW and limits['windows_cached'] == 4 and limits['windows_cached_scope'] == 'per_circuit'
 
 
 @pytest.mark.parametrize('offset', [0, 99_990, 100_000, 249_990])
@@ -210,6 +210,8 @@ def test_steps_resolve_windows_server_side(served, big, offset):
         assert all(r['op_start'] == r['step'] - 1 and r['op_end'] == r['step'] for r in rows)
     if offset == 249_990:
         assert rows[-1]['name'] == 'measure' and rows[-1]['instances'] == 2 and rows[-1]['state_boundary'] is True
+        # The index total used at the exact full source equals the window-derived count.
+        assert served[1].state.circuits.get(summary['id'])['parsed']['_total_instances'] == rows[-1]['op_end']
 
 
 def test_overview_instructions_and_expanded_checkpoints(served):
@@ -314,3 +316,87 @@ def test_window_exceeding_record_limit_fails_explicitly():
         assert 'statements 1–100,000' in response.text and '100,000 instructions' in response.text
         tail = client.get(f'/api/circuits/{digest}/steps', params={'offset': WINDOW})
         assert tail.status_code == 200 and tail.json()['steps'][0]['name'] == 'g'
+
+
+@pytest.mark.parametrize('statement', ['foo q[0];', 'cx q[0];', 'rz(1/0) q[0];', 'u2(0.1) q[0];', 'measure q -> c[0];', 'g(0.5) q[0];'])
+def test_index_rejects_exactly_what_whole_file_inspection_rejects(tmp_path, statement):
+    def message(result):
+        assert result.returncode != 0
+        return result.stderr.decode().split(' at byte')[0]
+    small, large = tmp_path / 'small.qasm', tmp_path / 'large.qasm'
+    small.write_bytes((PRELUDE + 'x q[0];\n' + statement + '\n').encode())
+    large.write_bytes((PRELUDE + 'x q[0];\n' * 150_000 + statement + '\n' + 'x q[0];\n' * 1_000).encode())
+    expected = message(run_cli(small))
+    assert message(run_cli('--index', small)) == expected
+    assert message(run_cli('--index', large)) == expected
+
+
+def test_full_source_needs_no_window_inspection(monkeypatch):
+    # Window 1 expands to 100,001 records (the final broadcast measurement), so
+    # it cannot be inspected; the exact full source must still be featurized.
+    source = PRELUDE + 'x q[0];\n' * (2 * WINDOW - 1) + 'measure q -> c;\n'
+    calls = []
+    original = app_module.native_window
+    def counted(source, parsed, k, *args, **kwargs):
+        calls.append(k)
+        return original(source, parsed, k, *args, **kwargs)
+    monkeypatch.setattr(app_module, 'native_window', counted)
+    app = create_app(Settings(root=ROOT), model=CaptureModel())
+    with TestClient(app) as client:
+        digest = hashlib.sha256(source.encode()).hexdigest()
+        app.state.policy.entries[digest] = {'origin': 'synthetic'}
+        assert client.post('/api/circuits', content=source.encode()).json()['inspection_mode'] == 'windowed'
+        for action in ('features', 'predict', 'explain'):
+            response = client.post(f'/api/circuits/{digest}/{action}', json={'step': 2 * WINDOW, 'threshold': 256})
+            assert response.status_code == 200, response.text
+            body = response.json()
+            assert body['prefix_kind'] == 'original_full_source' and body['prefix_hash'] == digest and body['source_origin'] is None
+        assert calls == []
+        assert app.state.circuits.get(digest)['parsed']['_total_instances'] == 2 * WINDOW + 1
+        response = client.get(f'/api/circuits/{digest}/steps', params={'offset': WINDOW})
+        assert response.status_code == 422 and '100,000 instructions' in response.text
+        # Prefixes inside the failing window keep the explicit error.
+        assert client.post(f'/api/circuits/{digest}/features', json={'step': WINDOW + 5}).status_code == 422
+
+
+def test_window_inspection_does_not_serialize_requests_behind_a_lock(monkeypatch):
+    import threading
+    import time
+    source = PRELUDE + 'x q[0];\n' * (3 * WINDOW + 1)
+    calls, started = [], threading.Semaphore(0)
+    original = app_module.native_window
+    def slow(source, parsed, k, *args, **kwargs):
+        calls.append(k)
+        started.release()
+        time.sleep(1.5)
+        return original(source, parsed, k, *args, **kwargs)
+    monkeypatch.setattr(app_module, 'native_window', slow)
+    app = create_app(Settings(root=ROOT), model=CaptureModel())
+    with TestClient(app) as client:
+        digest = hashlib.sha256(source.encode()).hexdigest()
+        app.state.policy.entries[digest] = {'origin': 'synthetic'}
+        assert client.post('/api/circuits', content=source.encode()).json()['inspection_mode'] == 'windowed'
+        results = {}
+        def get(name, k):
+            results[name] = client.get(f'/api/circuits/{digest}/steps', params={'offset': k * WINDOW, 'limit': 1})
+        first = threading.Thread(target=get, args=('a', 0))
+        first.start()
+        assert started.acquire(timeout=10)
+        same = threading.Thread(target=get, args=('a2', 0))
+        other = threading.Thread(target=get, args=('b', 1))
+        same.start(); other.start()
+        assert started.acquire(timeout=10)
+        # Both calculation workers are busy: a third window is refused at once.
+        began = time.perf_counter()
+        third = client.get(f'/api/circuits/{digest}/steps', params={'offset': 2 * WINDOW, 'limit': 1})
+        assert third.status_code == 429 and time.perf_counter() - began < 1
+        began = time.perf_counter()
+        assert client.get('/api/health').status_code == 200 and time.perf_counter() - began < 1
+        for thread in (first, same, other):
+            thread.join(30)
+        assert [results[n].status_code for n in ('a', 'a2', 'b')] == [200, 200, 200]
+        assert results['a2'].json()['steps'][0]['step'] == 1
+        assert sorted(calls) == [0, 1]  # the same window was inspected once
+        began = time.perf_counter()
+        assert client.get(f'/api/circuits/{digest}/steps', params={'offset': 0, 'limit': 1}).status_code == 200
+        assert time.perf_counter() - began < 1 and sorted(calls) == [0, 1]

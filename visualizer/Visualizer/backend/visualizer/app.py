@@ -27,7 +27,7 @@ from .limits import DEFAULT_UPLOAD_BYTES, INTERACTIVE_BYTES, PYTHON_FALLBACK_BYT
 
 ROOT = Path(__file__).resolve().parents[2]
 MAX_BYTES = DEFAULT_UPLOAD_BYTES
-WINDOWS_CACHED = 4  # Inspected statement windows retained per windowed circuit.
+WINDOWS_CACHED = 4  # Inspected statement windows retained per windowed circuit (circuit cache holds 4 circuits).
 
 
 class LRU:
@@ -228,32 +228,56 @@ def create_app(settings=None, model=None):
 
     def windowed_warnings(parsed):
         return [f"Windowed native inspection: {parsed['total_steps']:,} statements exceed the 100,000-statement interactive limit, so statements are inspected on demand in windows of {WINDOW_SIZE:,}. Only source-step navigation is available; expanded-instruction navigation is unavailable.",
-                'Features, prediction and SHAP use the exact source through the selected statement (the exact full source at the last statement). The native stepper keeps its 10,000-gate limit and state calculation keeps its 12-qubit/10,000-operation limits. Cloud execution is unavailable in windowed mode.',
+                f'Features, prediction and SHAP use the exact source through the selected statement (the exact full source at the last statement). The native stepper keeps its 10,000-gate limit and state calculation keeps its own limits ({STATE_OPERATIONS:,} operations; {STATE_VECTOR_QUBITS} qubits statevector, {STATE_MPS_QUBITS} MPS, {STATE_STABILIZER_QUBITS} stabilizer). Cloud execution is unavailable in windowed mode.',
                 f'A window whose {WINDOW_SIZE:,} statements expand to more than 100,000 primitive records (custom gates or register broadcasts) cannot be inspected and reports an explicit error.']
 
     def window_rows(record, k):
-        # One inspection per window at a time per circuit; at most four
-        # inspected windows are retained per circuit.
+        # The per-circuit lock covers only the cache lookup and in-flight
+        # registration. The native run takes one of the two worker slots
+        # (429 when both are busy); a request for a window already being
+        # inspected waits for that same inspection instead of starting another.
         with record['window_lock']:
             rows = record['window_cache'].get(k)
             if rows is not None:
                 return rows
+            pending = record['window_pending'].get(k)
+            owner = pending is None
+            if owner:
+                pending = record['window_pending'][k] = {'event': threading.Event(), 'rows': None, 'error': None}
+        window = record['parsed']['windows'][k]
+        label = f"statements {window['start_step']:,}–{window['end_step']:,}"
+        if not owner:
+            if not pending['event'].wait(20):
+                raise HTTPException(408, f'Windowed inspection of {label} is still running; try again shortly')
+            if pending['error'] is not None:
+                raise HTTPException(pending['error'].status_code, pending['error'].detail)
+            if pending['rows'] is None:
+                raise HTTPException(500, f'Windowed inspection of {label} failed unexpectedly')
+            return pending['rows']
+        try:
             if app.state.inspector_build is None:
                 raise HTTPException(422, 'Native inspector unavailable at server startup')
             if not app.state.workers.acquire(blocking=False):
                 raise HTTPException(429, 'Two calculations are already running; try again shortly')
-            window = record['parsed']['windows'][k]
             try:
                 rows = native_window(record['source'], record['parsed'], k, settings.root, app.state.inspector_build['binary_sha256'],
                                      max_bytes=settings.max_upload_bytes)
             except TimeoutError as exc:
-                raise HTTPException(408, f"Windowed inspection of statements {window['start_step']:,}–{window['end_step']:,} failed: {exc}") from exc
+                raise HTTPException(408, f'Windowed inspection of {label} failed: {exc}') from exc
             except (ValueError, OSError, KeyError, json.JSONDecodeError) as exc:
-                raise HTTPException(422, f"Windowed inspection of statements {window['start_step']:,}–{window['end_step']:,} failed: {type(exc).__name__}: {exc}") from exc
+                raise HTTPException(422, f'Windowed inspection of {label} failed: {type(exc).__name__}: {exc}') from exc
             finally:
                 app.state.workers.release()
             record['window_cache'].put(k, rows)
+            pending['rows'] = rows
             return rows
+        except HTTPException as exc:
+            pending['error'] = exc
+            raise
+        finally:
+            with record['window_lock']:
+                record['window_pending'].pop(k, None)
+            pending['event'].set()
 
     def windowed_step(record, step):
         if not 1 <= step <= record['parsed']['total_steps']:
@@ -308,7 +332,7 @@ def create_app(settings=None, model=None):
             elapsed = time.perf_counter() - started
             record = {'source': source, 'source_bytes': len(data), 'input_hash': cid, 'parsed': parsed, 'origin': approved['origin'], 'name': name, 'parse_seconds': elapsed}
             if parsed.get('inspection_mode') == 'windowed':
-                record.update(window_cache=LRU(WINDOWS_CACHED), window_lock=threading.Lock())
+                record.update(window_cache=LRU(WINDOWS_CACHED), window_lock=threading.Lock(), window_pending={})
             app.state.circuits.put(cid, record)
         return summary(cid, record)
 
@@ -382,7 +406,9 @@ def create_app(settings=None, model=None):
                     'checkpoint_label': 'Full circuit', 'input_hash': record['input_hash'],
                     'prefix_hash': record['input_hash'], 'source_origin': None}
         if p.get('inspection_mode') == 'windowed':
-            origin = windowed_step(record, request.step) if request.step else None
+            # The exact full source needs no window inspection (a window above
+            # the record limit must not block full-circuit prediction).
+            origin = windowed_step(record, request.step) if 0 < request.step < p['total_steps'] else None
         else:
             records = p.get('instructions', []) if request.step_kind == 'expanded' else p['steps']
             origin = records[request.step - 1] if request.step else None
@@ -569,8 +595,10 @@ def create_app(settings=None, model=None):
             if values.get('st_n_skipped_stmts') or values.get('st_n_param_parse_err') or values.get('st_n_unknown_gates'):
                 diagnostics.append('Native parser reports skipped statements, parameter errors, or unknown gates; inspect the st_* counters. Features preserved unchanged.')
             if record['parsed'].get('inspection_mode') == 'windowed':
-                # Global instance count through the selected statement (index offsets).
-                imported = windowed_step(record, request.step)['op_end'] if request.step else 0
+                # Global instance count through the selected statement (index offsets;
+                # the native index total for the exact full source).
+                total = record['parsed']['total_steps']
+                imported = record['parsed']['_total_instances'] if request.step == total else windowed_step(record, request.step)['op_end'] if request.step else 0
             else:
                 source_steps = (record['parsed'].get('instructions', []) if request.step_kind == 'expanded' else record['parsed']['steps'])[:request.step]
                 imported = sum(step['instances'] for step in source_steps)
